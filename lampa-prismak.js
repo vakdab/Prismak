@@ -771,6 +771,129 @@
     };
   }
 
+  var UASERIALS_CONFIG = {
+    base: 'https://uaserials.com',
+    password: '297796CCB81D255125'
+  };
+
+  function uaserialsAbsoluteUrl(url) {
+    if (!url) return '';
+    if (/^https?:\/\//i.test(url)) return url;
+    return UASERIALS_CONFIG.base + (url.charAt(0) == '/' ? url : '/' + url);
+  }
+  function uaserialsDocument(html) {
+    try { return new window.DOMParser().parseFromString(html, 'text/html'); } catch (e) { return null; }
+  }
+  function uaserialsText(node) { return node ? (node.textContent || '').trim() : ''; }
+  function uaserialsBase64(value) {
+    var binary = atob((value || '').replace(/\s/g, ''));
+    var bytes = new Uint8Array(binary.length);
+    for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  }
+  function uaserialsHex(value) {
+    var clean = (value || '').replace(/[^0-9a-f]/gi, '');
+    var bytes = new Uint8Array(Math.floor(clean.length / 2));
+    for (var i = 0; i < bytes.length; i++) bytes[i] = parseInt(clean.substr(i * 2, 2), 16);
+    return bytes;
+  }
+  function uaserialsDecodeTortuga(value) {
+    try {
+      var bytes = uaserialsBase64(value.replace(/-/g, '+').replace(/_/g, '/'));
+      if (bytes.length < 2) return '';
+      var out = new Uint8Array(bytes.length - 1), salt = bytes[0];
+      for (var i = 1; i < bytes.length; i++) out[i - 1] = bytes[i] ^ ((salt + 7 * (i - 1) + 13) % 256);
+      return new TextDecoder().decode(out);
+    } catch (e) { return ''; }
+  }
+  function uaserialsRequest(url, success, fail) {
+    var network = new Lampa.Reguest();
+    network.silent(url, function (response) {
+      success(typeof response == 'string' ? response : response && (response.responseText || response.body) || '');
+    }, fail);
+  }
+  function uaserialsDecrypt(payload) {
+    var data = typeof payload == 'string' ? JSON.parse(payload) : payload;
+    var webCrypto = window.crypto && window.crypto.subtle;
+    if (!webCrypto || !data || !data.ciphertext || !data.iv || !data.salt) return Promise.reject(new Error('UASerials AES is unavailable'));
+    var password = new TextEncoder().encode(UASERIALS_CONFIG.password);
+    return webCrypto.importKey('raw', password, { name: 'PBKDF2' }, false, ['deriveBits']).then(function (key) {
+      return webCrypto.deriveBits({ name: 'PBKDF2', salt: uaserialsHex(data.salt), iterations: 999, hash: 'SHA-512' }, key, 256);
+    }).then(function (bits) {
+      return webCrypto.importKey('raw', bits, { name: 'AES-CBC' }, false, ['decrypt']);
+    }).then(function (key) {
+      return webCrypto.decrypt({ name: 'AES-CBC', iv: uaserialsHex(data.iv) }, key, uaserialsBase64(data.ciphertext));
+    }).then(function (buffer) { return new TextDecoder().decode(buffer); });
+  }
+  function uaserialsTag(html) {
+    var doc = uaserialsDocument(html), node = doc && doc.querySelector('[data-tag1]');
+    if (node) return node.getAttribute('data-tag1');
+    var match = String(html || '').match(/data-tag1\s*=\s*["']([^"']+)["']/i);
+    return match ? match[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&') : '';
+  }
+  function uaserialsPlayerUrls(html) {
+    var tag = uaserialsTag(html);
+    if (!tag) return Promise.reject(new Error('UASerials player data not found'));
+    return uaserialsDecrypt(tag).then(function (decoded) {
+      var tabs = JSON.parse(decoded.replace(/\\/g, ''));
+      return (Array.isArray(tabs) ? tabs : []).filter(function (tab) {
+        return tab && tab.url && !/трейлер|trailer/i.test(tab.tabName || '');
+      }).map(function (tab) { return uaserialsAbsoluteUrl(tab.url); });
+    });
+  }
+  function uaserialsStreamsFromPlayer(url, success, fail) {
+    if (/\.m3u8(?:\?|$)/i.test(url)) return success([{ title: 'UASerials', quality: 'auto', url: url }]);
+    uaserialsRequest(url, function (html) {
+      var file = String(html).match(/file\s*[:=]\s*["']([^"']+)["']/i);
+      var subtitle = String(html).match(/subtitle\s*[:=]\s*["']([^"']+)["']/i);
+      var stream = file && (file[1].indexOf('http') === 0 ? file[1] : uaserialsDecodeTortuga(file[1]));
+      if (!stream) return fail(new Error('UASerials stream not found'));
+      var subtitles = [];
+      if (subtitle && subtitle[1]) {
+        var sub = subtitle[1].indexOf('http') === 0 ? subtitle[1] : uaserialsDecodeTortuga(subtitle[1]);
+        if (sub) subtitles.push({ label: 'Українська', language: 'uk', url: sub });
+      }
+      success([{ title: 'UASerials', quality: 'auto', url: stream, subtitles: subtitles }]);
+    }, fail);
+  }
+  var UASerialsClient = {
+    getSources: function (success) {
+      success({ key: 'uaserials', name: 'UASerials', enabled: true, capabilities: { search: true, content: true, stream: true } });
+    },
+    search: function (params, success, fail) {
+      var query = encodeURIComponent(params.title || params.original_title || '').replace(/%20/g, '+');
+      uaserialsRequest(UASERIALS_CONFIG.base + '/search/' + query + '/', function (html) {
+        var doc = uaserialsDocument(html), items = [];
+        if (doc) Array.prototype.forEach.call(doc.querySelectorAll('.uas-card'), function (card) {
+          var title = uaserialsText(card.querySelector('.uas-card__title'));
+          var original = uaserialsText(card.querySelector('.uas-card__orig'));
+          var posterNode = card.querySelector('.uas-card__img');
+          var poster = posterNode && (posterNode.getAttribute('data-src') || posterNode.getAttribute('src')) || '';
+          items.push({ title: title, title_en: original, poster: uaserialsAbsoluteUrl(poster), ref: { url: uaserialsAbsoluteUrl(card.getAttribute('href')) } });
+        });
+        success({ ok: true, items: items });
+      }, fail);
+    },
+    content: function (ref, success, fail) {
+      var url = uaserialsAbsoluteUrl(ref && (ref.url || ref.href));
+      uaserialsRequest(url, function (html) {
+        var doc = uaserialsDocument(html);
+        var title = uaserialsText(doc && doc.querySelector('.short-title')) || uaserialsText(doc && doc.querySelector('title'));
+        var posterNode = doc && doc.querySelector('div.fimg.img-wide img');
+        var poster = posterNode && (posterNode.getAttribute('src') || posterNode.getAttribute('data-src')) || '';
+        uaserialsPlayerUrls(html).then(function (players) {
+          if (!players.length) throw new Error('UASerials player URL not found');
+          var pending = players.length, streams = [];
+          players.forEach(function (player) {
+            uaserialsStreamsFromPlayer(player, function (next) {
+              streams = streams.concat(next); if (!--pending) success({ ok: true, type: 'movie', title: title, poster: uaserialsAbsoluteUrl(poster), streams: streams });
+            }, function () { if (!--pending) success({ ok: true, type: 'movie', title: title, poster: uaserialsAbsoluteUrl(poster), streams: streams }); });
+          });
+        }).catch(fail);
+      }, fail);
+    }
+  };
+
   var config = {
     api_base: 'https://bbe.lme.isroot.in/api/v2',
     storage_prefixes: {
@@ -814,13 +937,19 @@
     }, {
       key: "getSources",
       value: function getSources(success, fail) {
-        this.getJson(this.apiBase() + '/sources', success, fail);
+        this.getJson(this.apiBase() + '/sources', function (json) {
+          if (json && Array.isArray(json.sources) && !json.sources.some(function (item) { return item && item.key == 'uaserials'; })) {
+            json.sources.push({ key: 'uaserials', name: 'UASerials', enabled: true, capabilities: { search: true, content: true, stream: true } });
+          }
+          success(json);
+        }, fail);
       }
     }, {
       key: "search",
       value: function search(params, sources, success, fail) {
         var url = this.apiBase() + '/search';
         var sourceKey = Array.isArray(sources) ? sources.join(',') : sources;
+        if (sourceKey == 'uaserials') return UASerialsClient.search(params, success, fail);
         url = this.addParam(url, 'sources', sourceKey);
         url = this.addParam(url, 'source', sourceKey);
         for (var key in params) url = this.addParam(url, key, params[key]);
@@ -829,6 +958,7 @@
     }, {
       key: "getContent",
       value: function getContent(sourceKey, ref, success, fail) {
+        if (sourceKey == 'uaserials') return UASerialsClient.content(ref, success, fail);
         var url = this.apiBase() + '/content';
         var data = { source: sourceKey, ref: ref, full: true };
         this.postJson(url, data, success, fail);
@@ -836,6 +966,7 @@
     }, {
       key: "getStream",
       value: function getStream(sourceKey, ref, success, fail) {
+        if (sourceKey == 'uaserials') return uaserialsStreamsFromPlayer(ref && (ref.url || ref.href), function (streams) { success({ ok: true, streams: streams }); }, fail);
         var url = this.apiBase() + '/stream';
         var data = { source: sourceKey, ref: ref };
         this.postJson(url, data, success, fail);
@@ -1050,6 +1181,9 @@
       });
     }
     function applyAvailableSources(list) {
+      if (Array.isArray(list) && !list.some(function (item) { return item && item.key == 'uaserials'; })) {
+        list = list.concat([{ key: 'uaserials', name: 'UASerials', enabled: true, capabilities: { search: true, content: true, stream: true } }]);
+      }
       available_sources = list;
       list.forEach(function (item) {
         if (!item || !item.name && !item.key) return;
