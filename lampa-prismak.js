@@ -930,11 +930,7 @@
     if (e > 0) return [{ label: s.slice(s.lastIndexOf('[', e) + 1, e), url: s.slice(e + 1) }];
     return /^https?:\/\//i.test(s) ? [{ label: 'Subtitles', url: s }] : [];
   }
-  function ukrPlayerPage(url, referer, success, fail) {
-    ukrRequest('uakino', url, { referer: referer }, success, fail);
-  }
-
-  // UAkino and Eneyida use GET requests on iOS; other sources use API v2.
+  // Eneyida uses GET requests on iOS; other sources use API v2.
   var UkrSites = {
     eneyida: {
       search: function (params, success, fail) {
@@ -1315,7 +1311,7 @@
     }
     function applyAvailableSources(list) {
       if (Array.isArray(list)) {
-        // UASerials removed; UAkino + Eneyida are resolved on the device (always enabled)
+        // UASerials removed; Eneyida is resolved through the Worker proxy.
         list = list.filter(function (item) {
           var k = item && sourcesStore.normalizeName(item.key || item.name);
           return k && k != 'uaserials' && !UkrSites[k];
