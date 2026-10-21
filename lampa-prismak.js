@@ -875,7 +875,7 @@
         if (data && data.ok && Array.isArray(data.streams) && data.streams.length) return success(data.streams);
       } catch (e) {}
       fail(new Error('UASerials player did not return a video link'));
-    }, function () { fail(new Error('UASerials player request failed')); });
+    }, function () { fail(new Error('UASerials player request failed')); }, null, { dataType: 'json' });
   }
   var UASerialsClient = {
     getSources: function (success) {
