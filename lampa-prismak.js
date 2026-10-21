@@ -810,7 +810,7 @@
     var network = new Lampa.Reguest();
     network.silent(url, function (response) {
       success(typeof response == 'string' ? response : response && (response.responseText || response.body) || '');
-    }, fail);
+    }, fail, null, { dataType: 'text', headers: { Accept: 'text/html,application/xhtml+xml' } });
   }
   function uaserialsDecrypt(payload) {
     var data = typeof payload == 'string' ? JSON.parse(payload) : payload;
