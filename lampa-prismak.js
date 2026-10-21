@@ -837,7 +837,10 @@
     var tag = uaserialsTag(html);
     if (!tag) return Promise.reject(new Error('UASerials player data not found'));
     return uaserialsDecrypt(tag).then(function (decoded) {
-      var tabs = JSON.parse(decoded.replace(/\\/g, ''));
+      var clean = decoded.replace(/\\/g, '');
+      var start = clean.indexOf('['), end = clean.lastIndexOf(']');
+      if (start < 0 || end < start) throw new Error('UASerials player list is invalid');
+      var tabs = JSON.parse(clean.slice(start, end + 1));
       return (Array.isArray(tabs) ? tabs : []).filter(function (tab) {
         return tab && tab.url && !/трейлер|trailer/i.test(tab.tabName || '');
       }).map(function (tab) { return uaserialsAbsoluteUrl(tab.url); });
@@ -867,15 +870,54 @@
   }
   function uaserialsStreamsFromPlayer(url, success, fail) {
     if (/\.m3u8(?:\?|$)/i.test(url)) return success([{ title: 'UASerials', quality: 'auto', url: url }]);
-    var resolver = new Lampa.Reguest();
-    var resolverUrl = UASERIALS_CONFIG.proxy + '?resolve=1&url=' + encodeURIComponent(url);
-    resolver.silent(resolverUrl, function (response) {
-      try {
-        var data = typeof response === 'string' ? JSON.parse(response) : response;
-        if (data && data.ok && Array.isArray(data.streams) && data.streams.length) return success(data.streams);
-      } catch (e) {}
-      fail(new Error('UASerials player did not return a video link'));
-    }, function () { fail(new Error('UASerials player request failed')); }, null, { dataType: 'json' });
+    var settled = false;
+    function complete(streams) {
+      if (settled) return;
+      settled = true;
+      success(streams);
+    }
+    function failed(error) {
+      if (settled) return;
+      settled = true;
+      fail(error || new Error('UASerials player request failed'));
+    }
+    function proxyResolve() {
+      var resolver = new Lampa.Reguest();
+      var resolverUrl = UASERIALS_CONFIG.proxy + '?resolve=1&url=' + encodeURIComponent(url);
+      resolver.silent(resolverUrl, function (response) {
+        try {
+          var data = typeof response === 'string' ? JSON.parse(response) : response;
+          if (data && data.ok && Array.isArray(data.streams) && data.streams.length) return complete(data.streams);
+        } catch (e) {}
+        failed(new Error('UASerials player did not return a video link'));
+      }, function () { failed(new Error('UASerials player request failed')); }, null, { dataType: 'json' });
+    }
+    function withSubtitles(streams, raw) {
+      if (!raw || !streams.length) return streams;
+      var decoded = raw.indexOf('http') === 0 || raw.charAt(0) === '[' ? raw : uaserialsDecodeTortuga(raw);
+      if (!decoded) return streams;
+      var labelled = decoded.match(/^\[([^\]]+)\](https?:\/\/\S+)/);
+      var subtitleUrl = labelled ? labelled[2] : decoded;
+      var subtitles = [{ label: labelled ? labelled[1] : 'Українська', language: 'uk', url: subtitleUrl }];
+      streams.forEach(function (stream) { stream.subtitles = subtitles; });
+      return streams;
+    }
+    uaserialsRequest(url, function (html) {
+      var source = String(html || '');
+      var file = source.match(/file\s*[:=]\s*["']([^"']+)["']/i);
+      var subtitle = source.match(/subtitle\s*[:=]\s*["']([^"']+)["']/i);
+      if (!file) return proxyResolve();
+      var token = file[1].trim();
+      var decoded = token.indexOf('http') === 0 ? token : uaserialsDecodeTortuga(token);
+      var streams = uaserialsStreamsFromValue(decoded);
+      if (streams.length) return complete(withSubtitles(streams, subtitle && subtitle[1]));
+      if (token && token.indexOf('http') !== 0) {
+        return uaserialsResolveToken(token, function (resolved) {
+          complete(withSubtitles(resolved, subtitle && subtitle[1]));
+        }, proxyResolve);
+      }
+      proxyResolve();
+    }, proxyResolve);
   }
   var UASerialsClient = {
     getSources: function (success) {
