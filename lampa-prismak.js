@@ -955,8 +955,8 @@
         var items = [], seen = {}, left = queries.length, failed = 0;
         if (!left) return success({ ok: true, items: [] });
         queries.forEach(function (q) {
-          var body = 'do=search&subaction=search&story=' + encodeURIComponent(q).replace(/%20/g, '+');
-          ukrRequest('uakino', UKR_SITES.uakino.base + '/ua/', { post: body, referer: UKR_SITES.uakino.base + '/', nocache: false }, function (html) {
+          var searchUrl = UKR_SITES.uakino.base + '/search/' + encodeURIComponent(q).replace(/%20/g, '-') + '/';
+          ukrRequest('uakino', searchUrl, { referer: UKR_SITES.uakino.base + '/', nocache: false }, function (html) {
             var doc = ukrDoc(html);
             if (doc) Array.prototype.forEach.call(doc.querySelectorAll('div.movie-item.short-item'), function (card) {
               var a = card.querySelector('a.movie-title, a.full-movie');
@@ -1039,8 +1039,8 @@
         var items = [], seen = {}, left = queries.length, failed = 0;
         if (!left) return success({ ok: true, items: [] });
         queries.forEach(function (q) {
-          var body = 'do=search&subaction=search&story=' + encodeURIComponent(q).replace(/%20/g, '+');
-          ukrRequest('eneyida', UKR_SITES.eneyida.base + '/', { post: body, referer: UKR_SITES.eneyida.base + '/' }, function (html) {
+          var searchUrl = UKR_SITES.eneyida.base + '/index.php?do=search&subaction=search&story=' + encodeURIComponent(q);
+          ukrRequest('eneyida', searchUrl, { referer: UKR_SITES.eneyida.base + '/' }, function (html) {
             var doc = ukrDoc(html);
             if (doc) Array.prototype.forEach.call(doc.querySelectorAll('article.short'), function (card) {
               var a = card.querySelector('a.short_title'), href = a && a.getAttribute('href');
