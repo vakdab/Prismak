@@ -301,7 +301,8 @@ async function fetchSource(target, referer, method) {
     method: method || 'GET',
     headers: {
       'User-Agent': USER_AGENT,
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,*/*;q=0.8',
+      'Accept-Language': 'uk-UA,uk;q=0.9,en-US;q=0.8,en;q=0.7',
       'Referer': referer
     },
     cf: { cacheTtl: 0, cacheEverything: false }

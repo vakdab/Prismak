@@ -975,7 +975,7 @@
           });
         }
         function fallbackPlayers() {
-          uaserialsPlayerUrls(html).then(finish).catch(function () { finish([]); });
+          uaserialsPlayerUrls(html).then(finishMovie).catch(function () { finishMovie([]); });
         }
         uaserialsPlayerRefs(url, function (players) {
           if (players.length) finishSeries(players);
