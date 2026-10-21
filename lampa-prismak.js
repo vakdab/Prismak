@@ -89,7 +89,6 @@
     return true;
   }
 
-  // ==================== createV2 (без змін, окрім видалення фільміксу в APIClient) ====================
   function createV2(sourceKey) {
     return function v2(component, _object) {
       var api_client = component.api_client;
@@ -772,13 +771,9 @@
     };
   }
 
-  // ==================== config (без QR та filmix) ====================
   var config = {
     api_base: 'https://bbe.lme.isroot.in/api/v2',
-    community_watches_url: 'https://lampame.github.io/main/cw.js',
-    community_watches_name: 'CommunityWatches',
     storage_prefixes: {
-      cw_autoinstall_done: 'onlineua_cw_autoinstall_done',
       last_balanser: 'onlineua_last_balanser',
       balanser: 'onlineua_balanser',
       watched_last: 'onlineua_watched_last',
@@ -786,7 +781,6 @@
     }
   };
 
-  // ==================== APIClient (без filmix auth) ====================
   var APIClient = /*#__PURE__*/function () {
     function APIClient() {
       _classCallCheck(this, APIClient);
@@ -849,7 +843,6 @@
     }]);
   }();
 
-  // ==================== SourcesStore ====================
   var SourcesStore = /*#__PURE__*/function () {
     function SourcesStore() {
       _classCallCheck(this, SourcesStore);
@@ -947,7 +940,6 @@
     return Lampa.Utils.hash(season ? [season, episode, title, vn].join('') : title + vn);
   }
 
-  // ==================== component (без donate button, з onlineua префіксами) ====================
   function component(object) {
     var api_client = new APIClient();
     this.api_client = api_client;
@@ -1014,26 +1006,33 @@
       else sources = sources.filter(function (n) { return n !== 'starlight'; });
       if (include_midnight) { if (sources.indexOf('midnight') === -1) sources.push('midnight'); }
       else sources = sources.filter(function (n) { return n !== 'midnight'; });
+      
       sources = filterEnabledSources(sources);
       sources = sourcesStore.applyUserFilters(sources);
+      
+      // Жорстко виключаємо filmix та hdrezka
+      sources = sources.filter(function (name) { return name !== 'filmix' && name !== 'hdrezka'; });
+      
       return sources;
     }
     function getBaseSources() {
       var from_api = getEnabledSources();
       if (from_api) return from_api;
-      var keys = Object.keys(sources);
+      var keys = Object.keys(sources).filter(function(name) { return name !== 'filmix' && name !== 'hdrezka'; });
       return keys.length ? keys : [];
     }
     function filterEnabledSources(list) {
       var enabled = getEnabledSources();
-      if (!enabled) return list;
-      return list.filter(function (name) { return enabled.indexOf(name) !== -1; });
+      if (!enabled) return list.filter(function(name) { return name !== 'filmix' && name !== 'hdrezka'; });
+      return list.filter(function (name) {
+        return enabled.indexOf(name) !== -1 && name !== 'filmix' && name !== 'hdrezka';
+      });
     }
     function getEnabledSources() {
       if (!available_sources || !available_sources.length) return null;
       var enabled = available_sources.filter(function (item) { return item && item.enabled !== false; })
         .map(function (item) { return sourcesStore.normalizeName(item.key || item.name); })
-        .filter(Boolean);
+        .filter(function(name) { return name && name !== 'filmix' && name !== 'hdrezka'; });
       enabled.forEach(function (name) { return ensureSource(name); });
       return enabled.length ? enabled : null;
     }
@@ -1112,7 +1111,7 @@
         };
         if (filter.addButtonBack) filter.addButtonBack();
         filter.render().find('.filter--sort span').text(Lampa.Lang.translate('online_balanser'));
-        // donate button removed
+        
         files.appendFiles(scroll.render());
         files.appendHead(filter.render());
         scroll.body().addClass('torrent-list');
@@ -1171,7 +1170,7 @@
     this.getChoice = function (for_balanser) {
       var data = Lampa.Storage.cache('onlineua_choice_' + (for_balanser || balanser), 3000, {});
       var save = data[selected_id || object.movie.id] || {};
-      Lampa.Arrays.extend(save, { season: 0, voice: '', voice_id: 0, episodes_view: {}, movie_view: '' });
+      Lampa.Arrays.extend(save, { season: 0, voice: 0, voice_name: '', voice_id: 0, episodes_view: {}, movie_view: '' });
       return save;
     };
     this.extendChoice = function () { extended = true; source.extendChoice(this.getChoice()); };
@@ -1636,10 +1635,13 @@
     };
   }
 
-  // ==================== settings (тільки джерела) ====================
-  var PLUGIN_STORAGE_KEYS = ['ONLINEUA_SOURCES_SORT', 'ONLINEUA_SOURCES_HIDE', 'onlineua_cw_autoinstall_done', 'onlineua_last_balanser', 'onlineua_balanser', 'onlineua_watched_last', 'onlineua_view'];
+  var PLUGIN_STORAGE_KEYS = ['ONLINEUA_SOURCES_SORT', 'ONLINEUA_SOURCES_HIDE', 'onlineua_last_balanser', 'onlineua_balanser', 'onlineua_watched_last', 'onlineua_view'];
 
-  function isVisibleSource(key) { return key && key !== 'hdrezka'; }
+  function isVisibleSource(key) {
+    if (!key) return false;
+    // Жорстко виключаємо filmix та hdrezka зі списку налаштувань
+    return key !== 'hdrezka' && key !== 'filmix';
+  }
 
   function buildSourcesList() {
     var sources = sourcesStore.available_sources;
@@ -1756,56 +1758,27 @@
     });
   }
 
-  // ==================== Community Watches (без змін, крім префіксу) ====================
-  var communityWatchesPlugin = {
-    url: config.community_watches_url,
-    name: config.community_watches_name,
-    status: 1
-  };
-  var communityWatchesAutoinstallFlag = config.storage_prefixes.cw_autoinstall_done;
-  function normalizePluginUrl(url) {
-    return (url || '').toString().trim().replace(/[?#].*$/, '').replace(/\/+$/, '').replace(/^https?:\/\//i, '').toLowerCase();
-  }
-  function isCommunityWatchesInstalled(plugin) {
-    if (!plugin) return false;
-    if (typeof plugin === 'string') return normalizePluginUrl(plugin) === normalizePluginUrl(communityWatchesPlugin.url);
-    if (plugin.name === communityWatchesPlugin.name) return true;
-    return normalizePluginUrl(plugin.url) === normalizePluginUrl(communityWatchesPlugin.url);
-  }
-  function cleanupCommunityWatchesDuplicates(plugins) {
-    var hasCommunityWatches = false;
-    var duplicates = 0;
-    var uniqPlugins = [];
-    plugins.forEach(function (plugin) {
-      if (isCommunityWatchesInstalled(plugin)) {
-        if (hasCommunityWatches) duplicates++;
-        else { hasCommunityWatches = true; uniqPlugins.push(plugin); }
-        return;
-      }
-      uniqPlugins.push(plugin);
-    });
-    return { hasCommunityWatches: hasCommunityWatches, duplicates: duplicates, plugins: uniqPlugins };
-  }
-  function ensureCommunityWatchesPlugin() {
-    if (Lampa.Storage.get(communityWatchesAutoinstallFlag, false)) return;
+  // Видаляємо плагін CommunityWatches, якщо він залишився з попередніх версій
+  function removeCommunityWatchesIfInstalled() {
     var plugins = Lampa.Storage.get('plugins', []);
-    if (!Array.isArray(plugins)) plugins = [];
-    var state = cleanupCommunityWatchesDuplicates(plugins);
-    if (state.duplicates > 0) Lampa.Storage.set('plugins', state.plugins);
-    if (!state.hasCommunityWatches) {
-      Lampa.Plugins.add({
-        url: communityWatchesPlugin.url,
-        name: communityWatchesPlugin.name,
-        status: communityWatchesPlugin.status
-      });
-    }
-    Lampa.Storage.set(communityWatchesAutoinstallFlag, true);
+    if (!Array.isArray(plugins)) return;
+    var changed = false;
+    var filtered = plugins.filter(function(p) {
+      var url = (typeof p === 'string' ? p : p.url || '').toLowerCase();
+      if (url.indexOf('communitywatches') !== -1 || url.indexOf('cw.js') !== -1) {
+        changed = true;
+        return false;
+      }
+      return true;
+    });
+    if (changed) Lampa.Storage.set('plugins', filtered);
   }
 
-  // ==================== startPlugin ====================
   function startPlugin() {
     window.onlineua = true;
-    ensureCommunityWatchesPlugin();
+    
+    // Очищення залишків CW
+    removeCommunityWatchesIfInstalled();
 
     function resetTemplates() {
       Lampa.Template.add('onlineua_full', "<div class=\"online-prestige online-prestige--full selector\">\n            <div class=\"online-prestige__img\">\n                <img alt=\"\">\n                <div class=\"online-prestige__loader\"></div>\n            </div>\n            <div class=\"online-prestige__body\">\n                <div class=\"online-prestige__head\">\n                    <div class=\"online-prestige__title\">{title}</div>\n                    <div class=\"online-prestige__time\">{time}</div>\n                </div>\n                <div class=\"online-prestige__timeline\"></div>\n                <div class=\"online-prestige__footer\">\n                    <div class=\"online-prestige__info\">{info}</div>\n                    <div class=\"online-prestige__quality\">{quality}</div>\n                </div>\n            </div>\n        </div>");
@@ -1817,7 +1790,7 @@
 
     var manifest = {
       type: 'video',
-      version: '1.0.0',
+      version: '1.0.1',
       name: '[Free] OnlineUA',
       component: 'onlineua',
       onContextMenu: function onContextMenu(object) {
@@ -1875,7 +1848,7 @@
       $('body').append(Lampa.Template.get('onlineua_css', {}, true));
     }
 
-    var button = '<div class="full-start__button selector view--online view--onlineua" data-subtitle="[Free] OnlineUA ' + manifest.version + '"><span>OnlineUA</span></div>';
+    var button = "<div class=\"full-start__button selector view--online view--onlineua\" data-subtitle=\"[Free] OnlineUA v".concat(manifest.version, "\">\n        <svg viewBox=\"0 -4 28 28\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\"><g id=\"SVGRepo_bgCarrier\" stroke-width=\"0\"></g><g id=\"SVGRepo_tracerCarrier\" stroke-linecap=\"round\" stroke-linejoin=\"round\"></g><g id=\"SVGRepo_iconCarrier\"><g clip-path=\"url(#clip0_503_2809)\"><rect width=\"28\" height=\"20\" rx=\"2\" fill=\"white\"></rect><mask id=\"mask0_503_2809\" style=\"mask-type:alpha\" maskUnits=\"userSpaceOnUse\" x=\"0\" y=\"0\" width=\"28\" height=\"20\"><rect width=\"28\" height=\"20\" rx=\"2\" fill=\"white\"></rect></mask><g mask=\"url(#mask0_503_2809)\"><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M0 10.6667H28V0H0V10.6667Z\" fill=\"#156DD1\"></path><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M0 20H28V10.6667H0V20Z\" fill=\"#FFD948\"></path></g></g><defs><clipPath id=\"clip0_503_2809\"><rect width=\"28\" height=\"20\" rx=\"2\" fill=\"white\"></rect></clipPath></defs></g></svg>\n        <span>OnlineUA</span>\n    </div>";
 
     Lampa.Component.add('onlineua', component);
     resetTemplates();
