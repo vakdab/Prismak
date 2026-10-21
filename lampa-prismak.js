@@ -1294,13 +1294,13 @@
       } else success(uakinoStreamJson(data));
     }, fail);
   }
-  var WTCH_BASE = 'https://wtch.ch';
+  var WTCH_BASE = 'http://wtch.ch';
   var WTCH_PROVIDERS = { vibix: 'Vibix', veoveo: 'VeoVeo', hdvb: 'HDVB', cdnvideohub: 'VideoHUB' };
   function isWtchProvider(key) { return !!WTCH_PROVIDERS[key]; }
   function wtchAbsoluteUrl(url) {
     url = String(url || '');
     if (/^https?:\/\//i.test(url)) return url;
-    if (url.indexOf('//') === 0) return 'https:' + url;
+    if (url.indexOf('//') === 0) return 'http:' + url;
     return WTCH_BASE + (url.charAt(0) === '/' ? '' : '/') + url;
   }
   function wtchMakeUrl(provider, params) {
@@ -1895,13 +1895,6 @@
     }
     function applyAvailableSources(list) {
       if (!Array.isArray(list)) list = [];
-      // Drop providers whose WTCH backend is no longer published by the API.
-      // Keeping stale cached entries makes Prismak select Vibix/HDVB and wait
-      // for a dead endpoint instead of using the current source list.
-      list = list.filter(function (item) {
-        var key = sourcesStore.normalizeName(item && (item.key || item.name));
-        return !WTCH_PROVIDERS[key];
-      });
       // Register local sources (own implementations) so they still work
       // when the remote /sources endpoint does not list them.
       var localSources = [
@@ -1913,6 +1906,9 @@
         { key: 'starlight', name: 'starlight', display_name: 'Starlight' },
         { key: 'midnight', name: 'midnight', display_name: 'Midnight' }
       ];
+      Object.keys(WTCH_PROVIDERS).forEach(function (key) {
+        localSources.push({ key: key, name: key, display_name: WTCH_PROVIDERS[key] });
+      });
       localSources.forEach(function (local) {
         var existing = list.find(function (item) { return item && sourcesStore.normalizeName(item.key || item.name) === local.key; });
         if (!existing) {
