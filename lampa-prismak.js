@@ -807,12 +807,24 @@
       return new TextDecoder().decode(out);
     } catch (e) { return ''; }
   }
-  function uaserialsRequest(url, success, fail) {
+  function uaserialsRequest(url, success, fail, referer) {
     var network = new Lampa.Reguest();
     var requestUrl = UASERIALS_CONFIG.proxy + '?url=' + encodeURIComponent(url);
+    if (referer) requestUrl += '&referer=' + encodeURIComponent(referer);
     network.silent(requestUrl, function (response) {
       success(typeof response == 'string' ? response : response && (response.responseText || response.body) || '');
     }, fail, null, { dataType: 'text', headers: { Accept: 'text/html,application/xhtml+xml' } });
+  }
+  function uaserialsPlayerRefs(pageUrl, success, fail) {
+    var network = new Lampa.Reguest();
+    var requestUrl = UASERIALS_CONFIG.proxy + '?players=1&url=' + encodeURIComponent(pageUrl);
+    network.silent(requestUrl, function (response) {
+      try {
+        var data = typeof response == 'string' ? JSON.parse(response) : response;
+        if (data && data.ok && Array.isArray(data.players)) return success(data.players);
+      } catch (e) {}
+      if (fail) fail(new Error('UASerials player list is unavailable'));
+    }, fail, null, { dataType: 'json' });
   }
   function uaserialsDecrypt(payload) {
     var data = typeof payload == 'string' ? JSON.parse(payload) : payload;
@@ -868,56 +880,20 @@
       fail(new Error('UASerials resolver returned no video URL'));
     }, fail);
   }
-  function uaserialsStreamsFromPlayer(url, success, fail) {
-    if (/\.m3u8(?:\?|$)/i.test(url)) return success([{ title: 'UASerials', quality: 'auto', url: url }]);
-    var settled = false;
-    function complete(streams) {
-      if (settled) return;
-      settled = true;
-      success(streams);
-    }
-    function failed(error) {
-      if (settled) return;
-      settled = true;
-      fail(error || new Error('UASerials player request failed'));
-    }
-    function proxyResolve() {
-      var resolver = new Lampa.Reguest();
-      var resolverUrl = UASERIALS_CONFIG.proxy + '?resolve=1&url=' + encodeURIComponent(url);
-      resolver.silent(resolverUrl, function (response) {
-        try {
-          var data = typeof response === 'string' ? JSON.parse(response) : response;
-          if (data && data.ok && Array.isArray(data.streams) && data.streams.length) return complete(data.streams);
-        } catch (e) {}
-        failed(new Error('UASerials player did not return a video link'));
-      }, function () { failed(new Error('UASerials player request failed')); }, null, { dataType: 'json' });
-    }
-    function withSubtitles(streams, raw) {
-      if (!raw || !streams.length) return streams;
-      var decoded = raw.indexOf('http') === 0 || raw.charAt(0) === '[' ? raw : uaserialsDecodeTortuga(raw);
-      if (!decoded) return streams;
-      var labelled = decoded.match(/^\[([^\]]+)\](https?:\/\/\S+)/);
-      var subtitleUrl = labelled ? labelled[2] : decoded;
-      var subtitles = [{ label: labelled ? labelled[1] : 'Українська', language: 'uk', url: subtitleUrl }];
-      streams.forEach(function (stream) { stream.subtitles = subtitles; });
-      return streams;
-    }
-    uaserialsRequest(url, function (html) {
-      var source = String(html || '');
-      var file = source.match(/file\s*[:=]\s*["']([^"']+)["']/i);
-      var subtitle = source.match(/subtitle\s*[:=]\s*["']([^"']+)["']/i);
-      if (!file) return proxyResolve();
-      var token = file[1].trim();
-      var decoded = token.indexOf('http') === 0 ? token : uaserialsDecodeTortuga(token);
-      var streams = uaserialsStreamsFromValue(decoded);
-      if (streams.length) return complete(withSubtitles(streams, subtitle && subtitle[1]));
-      if (token && token.indexOf('http') !== 0) {
-        return uaserialsResolveToken(token, function (resolved) {
-          complete(withSubtitles(resolved, subtitle && subtitle[1]));
-        }, proxyResolve);
+  function uaserialsStreamsFromPlayer(url, success, fail, referer) {
+    if (!url) { if (fail) fail(new Error('UASerials player URL is missing')); return; }
+    var resolver = new Lampa.Reguest();
+    var resolverUrl = UASERIALS_CONFIG.proxy + '?resolve=1&url=' + encodeURIComponent(url);
+    if (referer) resolverUrl += '&referer=' + encodeURIComponent(referer);
+    resolver.silent(resolverUrl, function (response) {
+      try {
+        var data = typeof response === 'string' ? JSON.parse(response) : response;
+        if (data && data.ok && Array.isArray(data.streams) && data.streams.length) return success(data.streams);
+        if (fail) fail(new Error(data && data.error || 'UASerials player did not return a video link'));
+      } catch (e) {
+        if (fail) fail(new Error('Invalid response from UASerials proxy'));
       }
-      proxyResolve();
-    }, proxyResolve);
+    }, function () { if (fail) fail(new Error('UASerials proxy request failed')); }, null, { dataType: 'json' });
   }
   var UASerialsClient = {
     getSources: function (success) {
@@ -944,12 +920,19 @@
         var title = uaserialsText(doc && doc.querySelector('.short-title')) || uaserialsText(doc && doc.querySelector('title'));
         var posterNode = doc && doc.querySelector('div.fimg.img-wide img');
         var poster = posterNode && (posterNode.getAttribute('src') || posterNode.getAttribute('data-src')) || '';
-        uaserialsPlayerUrls(html).then(function (players) {
+        function finish(players) {
           var streams = players.map(function (player, index) {
-            return { title: index ? 'UASerials ' + (index + 1) : 'UASerials', quality: 'auto', ref: { url: player } };
+            return { title: index ? 'UASerials ' + (index + 1) : 'UASerials', quality: 'auto', ref: { url: player, referer: url } };
           });
           success({ ok: true, type: 'movie', title: title, poster: uaserialsAbsoluteUrl(poster), streams: streams });
-        }).catch(fail);
+        }
+        function fallbackPlayers() {
+          uaserialsPlayerUrls(html).then(finish).catch(function () { finish([]); });
+        }
+        uaserialsPlayerRefs(url, function (players) {
+          if (players.length) finish(players);
+          else fallbackPlayers();
+        }, fallbackPlayers);
       }, fail);
     }
   };
@@ -1026,7 +1009,7 @@
     }, {
       key: "getStream",
       value: function getStream(sourceKey, ref, success, fail) {
-        if (sourceKey == 'uaserials') return uaserialsStreamsFromPlayer(ref && (ref.url || ref.href), function (streams) { success({ ok: true, streams: streams }); }, fail);
+        if (sourceKey == 'uaserials') return uaserialsStreamsFromPlayer(ref && (ref.url || ref.href), function (streams) { success({ ok: true, streams: streams }); }, fail, ref && ref.referer);
         var url = this.apiBase() + '/stream';
         var data = { source: sourceKey, ref: ref };
         this.postJson(url, data, success, fail);
