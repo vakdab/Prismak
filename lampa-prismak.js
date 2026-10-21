@@ -696,7 +696,7 @@
               function startPlayback() {
                 Lampa.Player.play({
                   url: play_url,
-                  hls_type: sourceKey === 'uakino' || isWtchProvider(sourceKey) ? 'hlsjs' : undefined,
+                  hls_type: sourceKey === 'uakino' ? 'hlsjs' : undefined,
                   timeline: item.timeline,
                   quality: qualitys,
                   title: item.title,
@@ -753,7 +753,7 @@
               }
               Lampa.Player.play({
                 url: play_url,
-                hls_type: sourceKey === 'uakino' || isWtchProvider(sourceKey) ? 'hlsjs' : undefined,
+                hls_type: sourceKey === 'uakino' ? 'hlsjs' : undefined,
                 timeline: movie.timeline,
                 quality: qualitys,
                 title: movie.player_title || movie.title,
@@ -937,7 +937,7 @@
       function normalizeStreamUrl(url) {
         if (!url) return url;
         if (!isInnerPlayer()) return url;
-        if (sourceKey == 'animeon' || sourceKey == 'moonanime' || sourceKey == 'mikai' || sourceKey == 'bambooua' || sourceKey == 'uakino' || isWtchProvider(sourceKey)) return url;
+        if (sourceKey == 'animeon' || sourceKey == 'moonanime' || sourceKey == 'mikai' || sourceKey == 'bambooua' || sourceKey == 'uakino') return url;
         if (!isProxyEnabled()) return url;
         if (sourceKey === 'sirko') return wrapSirkoProxy(url);
         return wrapStreamProxy(url);
@@ -1294,228 +1294,6 @@
       } else success(uakinoStreamJson(data));
     }, fail);
   }
-  var WTCH_BASE = 'http://wtch.ch';
-  var WTCH_PROVIDERS = { vibix: 'Vibix', veoveo: 'VeoVeo', hdvb: 'HDVB', cdnvideohub: 'VideoHUB' };
-  function isWtchProvider(key) { return !!WTCH_PROVIDERS[key]; }
-  function wtchAbsoluteUrl(url) {
-    url = String(url || '');
-    if (/^https?:\/\//i.test(url)) return url;
-    if (url.indexOf('//') === 0) return 'http:' + url;
-    return WTCH_BASE + (url.charAt(0) === '/' ? '' : '/') + url;
-  }
-  function wtchMakeUrl(provider, params) {
-    var parts = [];
-    Object.keys(params || {}).forEach(function (key) {
-      var value = params[key];
-      if (value === undefined || value === null || value === '') return;
-      parts.push(encodeURIComponent(key) + '=' + encodeURIComponent(value));
-    });
-    return WTCH_BASE + '/lite/' + provider + (parts.length ? '?' + parts.join('&') : '');
-  }
-  function wtchAccountUrl(url) {
-    url = wtchAbsoluteUrl(url);
-    if (!/^https?:\/\/wtch\.ch(?::\d+)?(?:\/|$)/i.test(url)) return url;
-    function add(key, value) {
-      if (!value || new RegExp('[?&]' + key + '=').test(url)) return;
-      url = Lampa.Utils.addUrlComponent(url, key + '=' + encodeURIComponent(value));
-    }
-    add('account_email', Lampa.Storage.get('account_email', ''));
-    add('uid', Lampa.Storage.get('lampac_unic_id', ''));
-    add('nws_id', Lampa.Storage.get('lampac_nws_id', ''));
-    var token = Lampa.Storage.get('showy_token', '');
-    add('showy_token', token);
-    if (token) add('access_ticket', Lampa.Storage.get('showy_access_ticket', ''));
-    return url;
-  }
-  function wtchHeaders() {
-    var key = Lampa.Storage.get('kit_aesgcmkey', '');
-    return key ? { 'X-Kit-AesGcm': key } : {};
-  }
-  function wtchParsePage(response) {
-    var json = response;
-    if (typeof response === 'string') {
-      try { json = JSON.parse(response); } catch (e) { json = null; }
-    }
-    if (json && typeof json === 'object' && !Array.isArray(json)) return { json: json, items: [], buttons: [] };
-    var root = $('<div></div>').html(String(response || ''));
-    function parseCards(selector) {
-      var cards = [];
-      root.find(selector).each(function () {
-        var node = $(this), data = {};
-        try { data = JSON.parse(node.attr('data-json') || '{}'); } catch (e) { return; }
-        var text = String(node.text() || '').replace(/^\s+|\s+$/g, '');
-        data.text = data.text || data.name || data.title || text;
-        data.active = node.hasClass('active') || node.hasClass('focused');
-        var season = parseInt(node.attr('s') || data.season, 10);
-        var episode = parseInt(node.attr('e') || data.episode, 10);
-        if (!isNaN(season)) data.season = season;
-        if (!isNaN(episode)) data.episode = episode;
-        cards.push(data);
-      });
-      return cards;
-    }
-    return { json: null, items: parseCards('.videos__item'), buttons: parseCards('.videos__button') };
-  }
-  function wtchRequest(network, url, success, fail) {
-    network.timeout(18000);
-    network['native'](wtchAccountUrl(url), success, fail, false, { dataType: 'text', headers: wtchHeaders() });
-  }
-  function wtchIsSerial(params) {
-    if (!params) return false;
-    var serial = String(params.serial || '').toLowerCase();
-    var type = String(params.type || params.media_type || '').toLowerCase();
-    return params.serial === true || params.serial === 1 || serial === '1' || serial === 'true' || serial === 'tv' || type === 'tv' || type === 'serial' || params.is_series === true;
-  }
-  function wtchSearch(network, provider, params, success, fail) {
-    params = params || {};
-    var serial = wtchIsSerial(params);
-    var title = params.title || params.name || params.original_title || params.original_name || params.query || '';
-    var query = { title: title, serial: serial ? 1 : 0, year: params.year, imdb_id: params.imdb_id, kinopoisk_id: params.kinopoisk_id || params.kp_id };
-    wtchRequest(network, wtchMakeUrl(provider, query), function (response) {
-      var page = wtchParsePage(response);
-      if (page.json && page.json.error) { success({ ok: false, error: page.json.error }); return; }
-      var results = page.items.filter(function (item) { return item.method === 'link' || item.method === 'play' || item.method === 'call'; });
-      if (!results.length && page.json && page.json.url) {
-        results = [{ method: 'play', url: page.json.url, title: title, quality: page.json.quality }];
-      }
-      if (!results.length) { success({ ok: true, meta: { code: 'NO_RESULTS' }, items: [] }); return; }
-      success({ ok: true, items: results.map(function (item, index) {
-        return {
-          title: item.text || item.name || item.title || title || WTCH_PROVIDERS[provider],
-          year: item.year || params.year || '',
-          ref: { wtch_provider: provider, wtch_url: wtchAbsoluteUrl(item.url || wtchMakeUrl(provider, query)), wtch_method: item.method || 'link', wtch_title: item.text || item.name || item.title || title, wtch_serial: serial, wtch_quality: item.quality || null, wtch_similar: !!item.similar, is_series: serial, wtch_index: index }
-        };
-      }) });
-    }, fail);
-  }
-  function wtchStreamRef(item, provider, title, serial) {
-    return { wtch_provider: provider, wtch_url: wtchAbsoluteUrl(item.url), wtch_method: item.method || 'call', wtch_title: item.text || item.name || item.title || title, wtch_quality: item.quality || null, wtch_serial: !!serial, season: item.season || null, episode: item.episode || null, is_series: !!serial };
-  }
-  function wtchStreamJson(json, ref) {
-    var url = json && (json.url || json.stream) || '';
-    if (!url) return { ok: false, error: json && (json.error || json.message) || 'WTCH не повернув відеопотік' };
-    if (String(url).indexOf(' or ') >= 0) url = String(url).split(' or ')[0];
-    url = wtchAbsoluteUrl(url);
-    var quality = json.quality || ref.wtch_quality || 'auto';
-    var subtitles = [];
-    var subs = json.subtitles || json.subs || [];
-    if (typeof subs === 'string') subs = [{ url: subs }];
-    if (Array.isArray(subs)) subtitles = subs.map(function (sub, index) {
-      if (typeof sub === 'string') sub = { url: sub };
-      if (!sub || !sub.url) return null;
-      return { label: sub.label || sub.name || sub.lang || 'Субтитри ' + (index + 1), language: sub.lang || sub.language || '', url: wtchAbsoluteUrl(sub.url) };
-    }).filter(Boolean);
-    return { ok: true, streams: [{ url: url, title: ref.wtch_title || WTCH_PROVIDERS[ref.wtch_provider] || 'WTCH', quality: quality, subtitles: subtitles }], subtitles: subtitles };
-  }
-  function wtchResolveStream(network, ref, success, fail, depth) {
-    ref = ref || {}; depth = depth || 0;
-    if (depth > 6 || !ref.wtch_url) { success({ ok: false, error: 'Не вдалося розкрити потік WTCH' }); return; }
-    if (ref.wtch_method === 'play') { success(wtchStreamJson({ url: ref.wtch_url, quality: ref.wtch_quality }, ref)); return; }
-    wtchRequest(network, ref.wtch_url, function (response) {
-      var page = wtchParsePage(response);
-      if (page.json && page.json.url) { success(wtchStreamJson(page.json, ref)); return; }
-      var videos = page.items.filter(function (item) { return item.method === 'play' || item.method === 'call'; });
-      if (videos.length) {
-        var chosen = videos[0];
-        if (ref.episode) chosen = videos.filter(function (item) { return Number(item.episode) === Number(ref.episode) && (!ref.season || Number(item.season || ref.season) === Number(ref.season)); })[0] || chosen;
-        wtchResolveStream(network, wtchStreamRef(chosen, ref.wtch_provider, chosen.text || ref.wtch_title, ref.wtch_serial), success, fail, depth + 1);
-        return;
-      }
-      var next = page.buttons.filter(function (item) { return item.active; })[0] || page.buttons[0] || page.items.filter(function (item) { return item.method === 'link'; })[0];
-      if (next && next.url) { wtchResolveStream(network, wtchStreamRef(next, ref.wtch_provider, next.text || ref.wtch_title, ref.wtch_serial), success, fail, depth + 1); return; }
-      success({ ok: false, error: page.json && (page.json.error || page.json.message) || 'WTCH не знайшов відео' });
-    }, function (error) { if (fail) fail(error); else success({ ok: false, error: 'Помилка запиту WTCH' }); });
-  }
-  function wtchSeasonNumber(item, index) {
-    var number = parseInt(item && (item.season || item.id || item.number), 10);
-    if (isNaN(number)) {
-      var label = String(item && (item.text || item.name || item.title) || '');
-      var match = label.match(/(?:сезон|season)\s*(\d+)|(\d+)\s*(?:сезон|season)/i);
-      if (match) number = parseInt(match[1] || match[2], 10);
-    }
-    return number || index + 1;
-  }
-  function wtchEpisodeNumber(item, index) {
-    var number = parseInt(item && (item.episode || item.number), 10);
-    if (isNaN(number)) {
-      var label = String(item && (item.text || item.name || item.title) || '');
-      var match = label.match(/(?:сер(?:ія|ия)|епізод|episode)\s*(\d+)|(\d+)\s*(?:сер(?:ія|ия)|епізод|episode)/i);
-      if (match) number = parseInt(match[1] || match[2], 10);
-    }
-    return number || index + 1;
-  }
-  function wtchCollectEpisodes(network, url, seasonNo, provider, title, serial, callback, depth) {
-    depth = depth || 0;
-    if (depth > 5) { callback([]); return; }
-    wtchRequest(network, url, function (response) {
-      var page = wtchParsePage(response);
-      var videos = page.items.filter(function (item) { return item.method === 'play' || item.method === 'call'; });
-      if (videos.length) { callback(videos); return; }
-      var next = page.buttons.filter(function (item) { return item.active; })[0] || page.buttons[0] || page.items.filter(function (item) { return item.method === 'link' && !item.similar; })[0];
-      if (next && next.url) wtchCollectEpisodes(network, wtchAbsoluteUrl(next.url), seasonNo, provider, title, serial, callback, depth + 1);
-      else callback([]);
-    }, function () { callback([]); });
-  }
-  function wtchBuildSeries(network, ref, seasonPages, success) {
-    var tasks = seasonPages.map(function (entry) {
-      return new Promise(function (resolve) {
-        function finish(videos) {
-          var episodes = videos.map(function (video, index) {
-            var season = parseInt(video.season, 10) || entry.number;
-            var number = wtchEpisodeNumber(video, index);
-            var title = video.text || video.name || video.title || 'Серія ' + number;
-            return { season: season, number: number, episode: number, title: title, name: title, ref: wtchStreamRef(video, ref.wtch_provider, title || ref.wtch_title, true) };
-          });
-          resolve({ number: entry.number, episodes: episodes });
-        }
-        if (Array.isArray(entry.videos)) finish(entry.videos);
-        else wtchCollectEpisodes(network, entry.url, entry.number, ref.wtch_provider, ref.wtch_title, true, finish);
-      });
-    });
-    Promise.all(tasks).then(function (seasons) {
-      seasons = seasons.filter(function (season) { return season.episodes.length; }).sort(function (a, b) { return a.number - b.number; });
-      if (!seasons.length) { success({ ok: false, error: 'WTCH не повернув список серій' }); return; }
-      success({ ok: true, type: 'series', voices: [{ id: 'wtch', name: 'WTCH', display_name: 'WTCH', seasons: seasons }] });
-    });
-  }
-  function wtchContent(network, ref, success, fail, depth) {
-    ref = ref || {}; depth = depth || 0;
-    if (depth > 6 || !ref.wtch_url) { success({ ok: false, error: 'Некоректне посилання WTCH' }); return; }
-    wtchRequest(network, ref.wtch_url, function (response) {
-      var page = wtchParsePage(response);
-      if (page.json && page.json.url) { success(wtchStreamJson(page.json, ref)); return; }
-      var videos = page.items.filter(function (item) { return item.method === 'play' || item.method === 'call'; });
-      if (ref.wtch_serial || videos.some(function (item) { return item.episode || item.season; })) {
-        if (videos.length) {
-          var seasonNo = parseInt(ref.season, 10) || parseInt(videos[0].season, 10) || 1;
-          wtchBuildSeries(network, ref, [{ number: seasonNo, url: ref.wtch_url, videos: videos }], success);
-          return;
-        }
-        var links = page.items.filter(function (item) { return item.method === 'link' && !item.similar; });
-        if (links.length) {
-          var seasons = links.filter(function (item, index) { return /сезон|season/i.test(String(item.name || item.text || item.title || '')) || item.season || item.number; });
-          if (!seasons.length) seasons = links;
-          if (ref.season) seasons = seasons.filter(function (item, index) { return wtchSeasonNumber(item, index) === Number(ref.season); });
-          wtchBuildSeries(network, ref, seasons.map(function (item, index) { return { number: wtchSeasonNumber(item, index), url: wtchAbsoluteUrl(item.url) }; }), success);
-          return;
-        }
-      }
-      if (videos.length) {
-        success({ ok: true, type: 'movie', streams: videos.map(function (item, index) { return { title: item.text || item.name || item.title || WTCH_PROVIDERS[ref.wtch_provider] + ' ' + (index + 1), quality: item.quality || '', ref: wtchStreamRef(item, ref.wtch_provider, item.text || item.name || item.title || ref.wtch_title, false) }; }) });
-        return;
-      }
-      var next = page.buttons.filter(function (item) { return item.active; })[0] || page.buttons[0] || page.items.filter(function (item) { return item.method === 'link' && !item.similar; })[0];
-      if (next && next.url) {
-        var nested = {};
-        Lampa.Arrays.extend(nested, ref, true);
-        nested.wtch_url = wtchAbsoluteUrl(next.url);
-        nested.wtch_method = next.method || 'link';
-        wtchContent(network, nested, success, fail, depth + 1);
-        return;
-      }
-      success({ ok: false, error: page.json && (page.json.error || page.json.message) || 'WTCH не знайшов посилань' });
-    }, fail);
-  }
   var APIClient = /*#__PURE__*/function () {
     function APIClient() {
       _classCallCheck(this, APIClient);
@@ -1575,8 +1353,7 @@
       value: function search(params, sources, success, fail) {
         var sourceKey = Array.isArray(sources) ? sources.join(',') : sources;
         if (sourceKey === 'uakino') return uakinoFind(this.network, params || {}, success, fail);
-        if (isWtchProvider(sourceKey)) return wtchSearch(this.network, sourceKey, params || {}, success, fail);
-        if (Array.isArray(sources)) sources = sources.filter(function (name) { return name !== 'uakino' && !isWtchProvider(name); });
+        if (Array.isArray(sources)) sources = sources.filter(function (name) { return name !== 'uakino'; });
         var url = this.apiBase() + '/search';
         sourceKey = Array.isArray(sources) ? sources.join(',') : sources;
         url = this.addParam(url, 'sources', sourceKey);
@@ -1595,7 +1372,6 @@
       key: "getContent",
       value: function getContent(sourceKey, ref, success, fail) {
         if (sourceKey === 'uakino') return uakinoPlay(this.network, ref, success, fail);
-        if (isWtchProvider(sourceKey)) return wtchContent(this.network, ref, success, fail);
         var url = this.apiBase() + '/content';
         var data = {
           source: sourceKey,
@@ -1608,7 +1384,6 @@
       key: "getStream",
       value: function getStream(sourceKey, ref, success, fail) {
         if (sourceKey === 'uakino') return uakinoPlay(this.network, ref, success, fail);
-        if (isWtchProvider(sourceKey)) return wtchResolveStream(this.network, ref, success, fail);
         var url = this.apiBase() + '/stream';
         var data = {
           source: sourceKey,
@@ -1895,6 +1670,11 @@
     }
     function applyAvailableSources(list) {
       if (!Array.isArray(list)) list = [];
+      var removedSources = { vibix: true, veoveo: true, hdvb: true, cdnvideohub: true };
+      list = list.filter(function (item) {
+        var key = sourcesStore.normalizeName(item && (item.key || item.name));
+        return !removedSources[key];
+      });
       // Register local sources (own implementations) so they still work
       // when the remote /sources endpoint does not list them.
       var localSources = [
@@ -1906,9 +1686,6 @@
         { key: 'starlight', name: 'starlight', display_name: 'Starlight' },
         { key: 'midnight', name: 'midnight', display_name: 'Midnight' }
       ];
-      Object.keys(WTCH_PROVIDERS).forEach(function (key) {
-        localSources.push({ key: key, name: key, display_name: WTCH_PROVIDERS[key] });
-      });
       localSources.forEach(function (local) {
         var existing = list.find(function (item) { return item && sourcesStore.normalizeName(item.key || item.name) === local.key; });
         if (!existing) {
@@ -1917,7 +1694,7 @@
         } else {
           if (existing.enabled === undefined) existing.enabled = true;
           if (!existing.display_name) existing.display_name = local.display_name;
-          if (local.key === 'uakino' || WTCH_PROVIDERS[local.key]) existing.local = true;
+          if (local.key === 'uakino') existing.local = true;
         }
       });
       available_sources = list;
