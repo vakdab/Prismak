@@ -1,0 +1,13 @@
+{
+  "name": "prismak-uaserials-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Self-hosted UASerials/Tortuga proxy backend for Lampa",
+  "main": "uaserials-server.js",
+  "scripts": {
+    "start": "node uaserials-server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

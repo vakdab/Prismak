@@ -21,7 +21,9 @@ const STREAM_TTL_SECONDS = 6 * 60 * 60;
 const DEFAULT_REFERER = 'https://uaserials.com/';
 // Configure a Cloudflare Worker secret binding named STREAM_SIGNING_KEY.
 
-addEventListener('fetch', event => event.respondWith(handle(event.request)));
+if (typeof addEventListener === 'function') {
+  addEventListener('fetch', event => event.respondWith(handle(event.request)));
+}
 
 function json(value) {
   const headers = new Headers(CORS);
@@ -390,3 +392,5 @@ async function handle(request) {
       : new Response('Upstream request failed', { status: 502, headers: CORS });
   }
 }
+
+if (typeof module !== 'undefined') module.exports = { handle };
