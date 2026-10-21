@@ -1512,7 +1512,8 @@
     };
     this.getEpisodes = function (season, call) {
       var id = getTmdbId(object.movie);
-      season = toPositiveInt(season);
+      season = parseInt(season, 10);
+      if (isNaN(season) || season < 1) season = 0;
       if (!season) return call([]);
       var cache_key = id + '_' + season;
       if (tmdb_season_cache[cache_key]) return call(tmdb_season_cache[cache_key]);
