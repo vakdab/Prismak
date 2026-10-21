@@ -1,0 +1,56 @@
+name: Update README CDN SHA
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-readme-cdn-sha
+  cancel-in-progress: false
+
+jobs:
+  update-readme:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Update pinned CDN URL
+        env:
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          readme = Path("README.md")
+          content = readme.read_text(encoding="utf-8")
+          sha = os.environ["COMMIT_SHA"]
+          pattern = r"(https://cdn\.jsdelivr\.net/gh/vakdab/Prismak@)[0-9a-f]{40}(/lampa-prismak\.js)"
+          updated, count = re.subn(pattern, rf"\g<1>{sha}\g<2>", content, count=1)
+
+          if count != 1:
+              raise SystemExit("Pinned Prismak CDN URL was not found exactly once in README.md")
+
+          readme.write_text(updated, encoding="utf-8")
+          PY
+
+      - name: Commit and push README update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git diff --quiet -- README.md; then
+            echo "README.md already contains the current commit SHA."
+            exit 0
+          fi
+
+          git add README.md
+          git commit -m "chore: update pinned CDN commit in README"
+          git push origin HEAD:main
