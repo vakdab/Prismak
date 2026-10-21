@@ -823,11 +823,19 @@
         success(uaserialsHtml(response));
       }, fail, null, { dataType: 'text', headers: { Accept: 'text/html,application/xhtml+xml' } });
     }
+    function viaReader() {
+      var readerNetwork = new Lampa.Reguest();
+      readerNetwork.silent('https://r.jina.ai/' + url, function (response) {
+        var html = uaserialsHtml(response);
+        if (uaserialsUsable(html)) success(html);
+        else viaProxy();
+      }, viaProxy, null, { dataType: 'text', headers: { Accept: 'text/html', 'X-Return-Format': 'html' } });
+    }
     network.silent(url, function (response) {
       var html = uaserialsHtml(response);
       if (uaserialsUsable(html)) success(html);
-      else viaProxy();
-    }, viaProxy, null, { dataType: 'text', headers: { Accept: 'text/html,application/xhtml+xml' } });
+      else viaReader();
+    }, viaReader, null, { dataType: 'text', headers: { Accept: 'text/html,application/xhtml+xml' } });
   }
   function uaserialsPlayerRefs(pageUrl, success, fail) {
     var network = new Lampa.Reguest();
