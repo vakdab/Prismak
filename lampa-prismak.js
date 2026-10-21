@@ -945,13 +945,10 @@
         var posterNode = doc && doc.querySelector('div.fimg.img-wide img');
         var poster = posterNode && (posterNode.getAttribute('src') || posterNode.getAttribute('data-src')) || '';
         uaserialsPlayerUrls(html).then(function (players) {
-          if (!players.length) throw new Error('UASerials player URL not found');
-          var pending = players.length, streams = [];
-          players.forEach(function (player) {
-            uaserialsStreamsFromPlayer(player, function (next) {
-              streams = streams.concat(next); if (!--pending) success({ ok: true, type: 'movie', title: title, poster: uaserialsAbsoluteUrl(poster), streams: streams });
-            }, function () { if (!--pending) success({ ok: true, type: 'movie', title: title, poster: uaserialsAbsoluteUrl(poster), streams: streams }); });
+          var streams = players.map(function (player, index) {
+            return { title: index ? 'UASerials ' + (index + 1) : 'UASerials', quality: 'auto', ref: { url: player } };
           });
+          success({ ok: true, type: 'movie', title: title, poster: uaserialsAbsoluteUrl(poster), streams: streams });
         }).catch(fail);
       }, fail);
     }
