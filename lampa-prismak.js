@@ -1512,6 +1512,8 @@
     };
     this.getEpisodes = function (season, call) {
       var id = getTmdbId(object.movie);
+      season = toPositiveInt(season);
+      if (!season) return call([]);
       var cache_key = id + '_' + season;
       if (tmdb_season_cache[cache_key]) return call(tmdb_season_cache[cache_key]);
       if (id && object.movie.name) {
@@ -1553,7 +1555,7 @@
       if (!items.length) return this.empty();
       scroll.append(Lampa.Template.get('onlineua_watched', {}));
       this.updateWatched();
-      this.getEpisodes(items[0].season, function (episodes) {
+      this.getEpisodes(items[0].season || 0, function (episodes) {
         var viewed = Lampa.Storage.cache('online_view', 5000, []);
         var serial = object.movie.name ? true : false;
         var choice = _this4.getChoice();
