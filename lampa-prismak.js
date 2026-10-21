@@ -773,6 +773,7 @@
 
   var UASERIALS_CONFIG = {
     base: 'https://uaserials.com',
+    proxy: 'https://prismak-uaserials-proxy.animegran8.workers.dev/',
     password: '297796CCB81D255125'
   };
 
@@ -808,7 +809,8 @@
   }
   function uaserialsRequest(url, success, fail) {
     var network = new Lampa.Reguest();
-    network.silent(url, function (response) {
+    var requestUrl = UASERIALS_CONFIG.proxy + '?url=' + encodeURIComponent(url);
+    network.silent(requestUrl, function (response) {
       success(typeof response == 'string' ? response : response && (response.responseText || response.body) || '');
     }, fail, null, { dataType: 'text', headers: { Accept: 'text/html,application/xhtml+xml' } });
   }
