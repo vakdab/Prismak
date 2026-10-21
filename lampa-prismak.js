@@ -931,6 +931,28 @@
     return /^https?:\/\//i.test(s) ? [{ label: 'Subtitles', url: s }] : [];
   }
   // Eneyida uses GET requests on iOS; other sources use API v2.
+  function eneyidaTitleKey(value) {
+    return String(value || '').toLowerCase()
+      .replace(/[«»“”"'`]/g, '')
+      .replace(/[^\p{L}\p{N}]+/gu, ' ')
+      .replace(/\s+/g, ' ').trim();
+  }
+  function eneyidaBestItem(items, params) {
+    if (!items.length) return null;
+    var wanted = eneyidaTitleKey(params && (params.title || params.original_title));
+    if (!wanted) return items[0];
+    var wantedWords = wanted.split(' ').filter(function (word) { return word.length > 1; });
+    return items.map(function (item, index) {
+      var title = eneyidaTitleKey(item.title);
+      var score = title == wanted ? 100000 : 0;
+      if (title.indexOf(wanted) === 0) score += 10000;
+      if (title.indexOf(wanted) !== -1) score += 5000;
+      var titleWords = title.split(' ');
+      wantedWords.forEach(function (word) { if (titleWords.indexOf(word) !== -1) score += 100; });
+      score -= Math.abs(title.length - wanted.length);
+      return { item: item, score: score, index: index };
+    }).sort(function (a, b) { return b.score - a.score || a.index - b.index; })[0].item;
+  }
   var UkrSites = {
     eneyida: {
       search: function (params, success, fail) {
@@ -951,7 +973,11 @@
             if (--left === 0) finish();
           }, function () { failed++; if (--left === 0) finish(); });
         });
-        function finish() { if (!items.length && failed === queries.length) return fail && fail('blocked'); success({ ok: true, items: items }); }
+        function finish() {
+          if (!items.length && failed === queries.length) return fail && fail('blocked');
+          var best = eneyidaBestItem(items, params);
+          success({ ok: true, items: best ? [best] : [] });
+        }
       },
       content: function (ref, success, fail) {
         var url = ukrAbs('eneyida', ref && (ref.url || ref.href));
