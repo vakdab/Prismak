@@ -851,6 +851,7 @@
     uakino: { name: 'UAkino', base: 'https://uakino.best' },
     eneyida: { name: 'Eneyida', base: 'https://eneyida.tv' }
   };
+  var UKR_PROXY = 'https://prismak-plugin.animegran8.workers.dev/source';
   var ukr_page_cache = {};
 
   function ukrAbs(site, url) {
@@ -876,7 +877,7 @@
     return '';
   }
 
-  /* Fetch with fallbacks: device -> reader. `post` is a urlencoded string for search. */
+  /* Fetch through the Worker proxy so Apple clients do not need direct access to the sites. */
   function ukrRequest(site, url, opt, success, fail) {
     opt = opt || {};
     var key = (opt.post ? 'P:' : 'G:') + url + (opt.post || '');
@@ -884,23 +885,13 @@
     var done = false;
     function ok(html) { if (done) return; done = true; if (!opt.nocache) ukr_page_cache[key] = html; success(html); }
     function bad(why) { if (done) return; done = true; if (fail) fail(why); }
-    function viaReader() {
-      if (opt.post) return bad('blocked');
-      var net = new Lampa.Reguest();
-      net.silent('https://r.jina.ai/' + url, function (response) {
-        var html = ukrBody(response);
-        if (ukrBlocked(html)) bad('blocked'); else ok(html);
-      }, function () { bad('network'); }, null, { dataType: 'text', headers: { Accept: 'text/html', 'X-Return-Format': 'html' } });
-    }
-    var headers = { Accept: opt.json ? 'application/json, text/javascript, */*; q=0.01' : 'text/html,application/xhtml+xml', 'Accept-Language': 'uk-UA,uk;q=0.9,en;q=0.7' };
-    if (opt.json) headers['X-Requested-With'] = 'XMLHttpRequest';
-    if (opt.referer) headers.Referer = opt.referer;
-    if (opt.post) headers['Content-Type'] = 'application/x-www-form-urlencoded';
+    if (opt.post) return bad('unsupported');
+    var proxyUrl = UKR_PROXY + '?site=' + encodeURIComponent(site) + '&url=' + encodeURIComponent(url);
     var net = new Lampa.Reguest();
-    net.silent(url, function (response) {
+    net.silent(proxyUrl, function (response) {
       var html = ukrBody(response);
-      if (ukrBlocked(html) && !opt.json) viaReader(); else ok(html);
-    }, viaReader, opt.post || null, { dataType: 'text', headers: headers, method: opt.post ? 'POST' : 'GET' });
+      if (ukrBlocked(html) && !opt.json) bad('blocked'); else ok(html);
+    }, function () { bad('network'); }, null, { dataType: 'text' });
   }
 
   /* ---- Tortuga "file" decoder (XOR, first byte = salt) ---- */
