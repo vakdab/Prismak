@@ -880,11 +880,14 @@
       fail(new Error('UASerials resolver returned no video URL'));
     }, fail);
   }
-  function uaserialsStreamsFromPlayer(url, success, fail, referer) {
-    if (!url) { if (fail) fail(new Error('UASerials player URL is missing')); return; }
-    var resolver = new Lampa.Reguest();
-    var resolverUrl = UASERIALS_CONFIG.proxy + '?resolve=1&url=' + encodeURIComponent(url);
-    if (referer) resolverUrl += '&referer=' + encodeURIComponent(referer);
+      function uaserialsStreamsFromPlayer(url, success, fail, referer, episode) {
+        if (!url) { if (fail) fail(new Error('UASerials player URL is missing')); return; }
+        var resolver = new Lampa.Reguest();
+        var resolverUrl = UASERIALS_CONFIG.proxy + '?resolve=1&url=' + encodeURIComponent(url);
+        if (referer) resolverUrl += '&referer=' + encodeURIComponent(referer);
+        if (episode && episode.season) resolverUrl += '&season=' + encodeURIComponent(episode.season);
+        if (episode && episode.episode) resolverUrl += '&episode=' + encodeURIComponent(episode.episode);
+        if (episode && episode.file) resolverUrl += '&episode_file=' + encodeURIComponent(episode.file);
     resolver.silent(resolverUrl, function (response) {
       try {
         var data = typeof response === 'string' ? JSON.parse(response) : response;
@@ -893,8 +896,20 @@
       } catch (e) {
         if (fail) fail(new Error('Invalid response from UASerials proxy'));
       }
-    }, function () { if (fail) fail(new Error('UASerials proxy request failed')); }, null, { dataType: 'json' });
-  }
+      }, function () { if (fail) fail(new Error('UASerials proxy request failed')); }, null, { dataType: 'json' });
+      }
+      function uaserialsPlayerStructure(playerUrl, referer, success, fail) {
+        var network = new Lampa.Reguest();
+        var requestUrl = UASERIALS_CONFIG.proxy + '?structure=1&url=' + encodeURIComponent(playerUrl);
+        if (referer) requestUrl += '&referer=' + encodeURIComponent(referer);
+        network.silent(requestUrl, function (response) {
+          try {
+            var data = typeof response == 'string' ? JSON.parse(response) : response;
+            if (data && data.ok && Array.isArray(data.seasons)) return success(data.seasons);
+          } catch (e) {}
+          if (fail) fail(new Error('UASerials player structure is unavailable'));
+        }, fail, null, { dataType: 'json' });
+      }
   var UASerialsClient = {
     getSources: function (success) {
       success({ key: 'uaserials', name: 'UASerials', enabled: true, capabilities: { search: true, content: true, stream: true } });
@@ -920,19 +935,54 @@
         var title = uaserialsText(doc && doc.querySelector('.short-title')) || uaserialsText(doc && doc.querySelector('title'));
         var posterNode = doc && doc.querySelector('div.fimg.img-wide img');
         var poster = posterNode && (posterNode.getAttribute('src') || posterNode.getAttribute('data-src')) || '';
-        function finish(players) {
+        function finishMovie(players) {
           var streams = players.map(function (player, index) {
             return { title: index ? 'UASerials ' + (index + 1) : 'UASerials', quality: 'auto', ref: { url: player, referer: url } };
           });
           success({ ok: true, type: 'movie', title: title, poster: uaserialsAbsoluteUrl(poster), streams: streams });
         }
+        function finishSeries(players) {
+          var pending = players.length, structures = [];
+          if (!pending) return finishMovie(players);
+          players.forEach(function (player, playerIndex) {
+            uaserialsPlayerStructure(player, url, function (seasons) {
+              structures[playerIndex] = seasons; pending--;
+              if (!pending) {
+                var valid = structures.filter(function (item) { return Array.isArray(item) && item.length; });
+                if (!valid.length) return finishMovie(players);
+                var voices = valid.map(function (seasons, index) {
+                  var sourcePlayer = players[structures.indexOf(seasons)];
+                  return {
+                    id: sourcePlayer || index,
+                    display_name: index ? 'UASerials ' + (index + 1) : 'UASerials',
+                    seasons: seasons.map(function (season, seasonIndex) {
+                      var seasonNumber = Number(season.season || season.number || seasonIndex + 1);
+                      var rawEpisodes = season.folder || season.episodes || [];
+                      return { title: 'Season ' + seasonNumber, season: seasonNumber, episodes: rawEpisodes.map(function (episode, episodeIndex) {
+                        var episodeNumber = Number(episode.number || episode.episode || episodeIndex + 1);
+                        return { title: episode.title || 'Episode ' + episodeNumber, number: episodeNumber,
+                          ref: { url: sourcePlayer, referer: url, season: seasonNumber, episode: episodeNumber, file: episode.file || '' } };
+                      }) };
+                    })
+                  };
+                });
+                success({ ok: true, type: 'series', title: title, poster: uaserialsAbsoluteUrl(poster), voices: voices });
+              }
+            }, function () {
+              structures[playerIndex] = []; pending--;
+              if (!pending) finishMovie(players);
+            });
+          });
+        }
         function fallbackPlayers() {
           uaserialsPlayerUrls(html).then(finish).catch(function () { finish([]); });
         }
         uaserialsPlayerRefs(url, function (players) {
-          if (players.length) finish(players);
+          if (players.length) finishSeries(players);
           else fallbackPlayers();
-        }, fallbackPlayers);
+        }, function () {
+          fallbackPlayers();
+        });
       }, fail);
     }
   };
@@ -1009,7 +1059,7 @@
     }, {
       key: "getStream",
       value: function getStream(sourceKey, ref, success, fail) {
-        if (sourceKey == 'uaserials') return uaserialsStreamsFromPlayer(ref && (ref.url || ref.href), function (streams) { success({ ok: true, streams: streams }); }, fail, ref && ref.referer);
+        if (sourceKey == 'uaserials') return uaserialsStreamsFromPlayer(ref && (ref.url || ref.href), function (streams) { success({ ok: true, streams: streams }); }, fail, ref && ref.referer, ref);
         var url = this.apiBase() + '/stream';
         var data = { source: sourceKey, ref: ref };
         this.postJson(url, data, success, fail);

@@ -173,6 +173,17 @@ function decodePlayerValue(value) {
   return decodeFile(raw) || raw;
 }
 
+function parsePlayerStructure(value) {
+  const decoded = decodePlayerValue(value).replace(/\\/g, '').trim();
+  if (!decoded.startsWith('[')) return null;
+  try {
+    const seasons = JSON.parse(decoded);
+    return Array.isArray(seasons) ? seasons : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 function getSigningKey() {
   const secret = globalThis.STREAM_SIGNING_KEY;
   if (typeof secret !== 'string' || secret.length < 32) throw new Error('HLS proxy signing key is not configured');
@@ -312,7 +323,7 @@ async function handle(request) {
   if (!raw) return new Response('Missing url', { status: 400, headers: CORS });
   const target = isHttpsUrl(raw);
   if (!target) return new Response('Host not allowed', { status: 403, headers: CORS });
-  if (query.get('resolve') === '1' && /\.m3u8$/i.test(target.pathname)) {
+    if (query.get('resolve') === '1' && /\.m3u8$/i.test(target.pathname)) {
     try {
       return json({ ok: true, streams: [{ title: 'UASerials', quality: 'auto', url: await signStreamUrl(target.toString(), 'https://tortuga.tw/', requestUrl.origin) }] });
     } catch (_) {
@@ -334,7 +345,17 @@ async function handle(request) {
       const html = await upstream.text();
       const file = extractPlayerValue(html);
       if (!file) return json({ ok: false, error: 'Player file not found', upstreamStatus: upstream.status });
-      const decoded = file.split(';').map(decodePlayerValue).join(';');
+      let decoded = file.split(';').map(decodePlayerValue).join(';');
+      const episodeFile = query.get('episode_file');
+      if (episodeFile) decoded = decodePlayerValue(episodeFile);
+      else if (query.get('season') || query.get('episode')) {
+        const seasons = parsePlayerStructure(file);
+        const seasonNumber = Number(query.get('season')) || 1;
+        const episodeNumber = Number(query.get('episode')) || 1;
+        const season = (seasons || []).find((item, index) => Number(item.season || item.number || index + 1) === seasonNumber);
+        const episode = season && (season.folder || season.episodes || []).find((item, index) => Number(item.number || item.episode || index + 1) === episodeNumber);
+        if (episode && episode.file) decoded = decodePlayerValue(episode.file);
+      }
       const found = extractStreams(decoded);
       if (!found.length) return json({ ok: false, error: 'HLS URL not found', upstreamStatus: upstream.status, playerStatus: upstream.status });
       const host = target.hostname.toLowerCase();
@@ -345,6 +366,13 @@ async function handle(request) {
         url: await signStreamUrl(stream.url, hlsReferer, requestUrl.origin)
       })));
       return json({ ok: true, streams, poster: null });
+    }
+    if (query.get('structure') === '1') {
+      const html = await upstream.text();
+      const file = extractPlayerValue(html);
+      const seasons = file ? parsePlayerStructure(file) : null;
+      if (!seasons) return json({ ok: false, error: 'Player structure not found', upstreamStatus: upstream.status });
+      return json({ ok: true, seasons });
     }
     if (query.get('sign') === '1') {
       if (!/\.m3u8$/i.test(target.pathname)) return json({ ok: false, error: 'Only HLS playlists can be signed' });
