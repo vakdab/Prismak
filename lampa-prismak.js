@@ -842,13 +842,8 @@
     });
   }
 
-  /* ====================================================================
-     UAkino + Eneyida: client-side sources (logic ported from
-     CakesTwix/cloudstream-extensions-uk). Both sites sit behind Cloudflare,
-     so they are read ON THE DEVICE (user IP) with a reader fallback.
-     ==================================================================== */
+  /* Eneyida source through the Worker proxy for Apple/Lampa clients. */
   var UKR_SITES = {
-    uakino: { name: 'UAkino', base: 'https://uakino.best' },
     eneyida: { name: 'Eneyida', base: 'https://eneyida.tv' }
   };
   var UKR_PROXY = 'https://prismak-plugin.animegran8.workers.dev/source';
@@ -941,90 +936,6 @@
 
   // UAkino and Eneyida use GET requests on iOS; other sources use API v2.
   var UkrSites = {
-    uakino: {
-      search: function (params, success, fail) {
-        var queries = [params.title, params.original_title].filter(function (v, i, a) { return v && a.indexOf(v) === i; });
-        var items = [], seen = {}, left = queries.length, failed = 0;
-        if (!left) return success({ ok: true, items: [] });
-        queries.forEach(function (q) {
-          var searchUrl = UKR_SITES.uakino.base + '/search/' + encodeURIComponent(q).replace(/%20/g, '-') + '/';
-          ukrRequest('uakino', searchUrl, { referer: UKR_SITES.uakino.base + '/', nocache: false }, function (html) {
-            var doc = ukrDoc(html);
-            if (doc) Array.prototype.forEach.call(doc.querySelectorAll('div.movie-item.short-item'), function (card) {
-              var a = card.querySelector('a.movie-title, a.full-movie');
-              var href = a && a.getAttribute('href');
-              if (!href || /(\/news\/)|(\/franchise\/)/.test(href) || seen[href]) return;
-              seen[href] = 1;
-              var img = card.querySelector('img');
-              items.push({ title: ukrText(card.querySelector('a.movie-title, div.full-movie-title')) || ukrText(a), poster: ukrAbs('uakino', img && (img.getAttribute('src') || img.getAttribute('data-src'))), ref: { url: ukrAbs('uakino', href), source: 'uakino' } });
-            });
-            if (--left === 0) finish();
-          }, function () { failed++; if (--left === 0) finish(); });
-        });
-        function finish() { if (!items.length && failed === queries.length) return fail && fail('blocked'); success({ ok: true, items: items }); }
-      },
-      content: function (ref, success, fail) {
-        var url = ukrAbs('uakino', ref && (ref.url || ref.href));
-        ukrRequest('uakino', url, { referer: UKR_SITES.uakino.base + '/' }, function (html) {
-          var doc = ukrDoc(html);
-          if (!doc) return fail && fail('parse');
-          var title = ukrText(doc.querySelector('h1 span.solototle')) || ukrText(doc.querySelector('h1'));
-          var holder = doc.querySelector('div.playlists-ajax');
-          var newsId = (holder && holder.getAttribute('data-news_id')) || ((url.split('/').pop() || '').split('-')[0].match(/^\d+$/) || [])[0] || '';
-          var pagePlayers = [];
-          Array.prototype.forEach.call(doc.querySelectorAll('iframe#pre, iframe[data-src], iframe[src]'), function (f) {
-            var u = f.getAttribute('data-src') || f.getAttribute('src');
-            u = ukrAbs('uakino', u);
-            if (u && !/youtube|youtu\.be|trailer/i.test(u) && pagePlayers.indexOf(u) === -1) pagePlayers.push(u);
-          });
-          function playlist(cb) {
-            if (!newsId) return cb([]);
-            var api = UKR_SITES.uakino.base + '/engine/ajax/playlists.php?news_id=' + newsId + '&xfield=playlist';
-            ukrRequest('uakino', api, { json: true, referer: url, nocache: true }, function (text) {
-              var htmlText = text;
-              try { var j = JSON.parse(text); if (j && j.success) htmlText = j.response; else if (j && j.response) htmlText = j.response; } catch (e) {}
-              var pdoc = ukrDoc(htmlText), list = [];
-              if (pdoc) Array.prototype.forEach.call(pdoc.querySelectorAll('div.playlists-videos li'), function (li) {
-                var file = ukrAbs('uakino', (li.getAttribute('data-file') || '').trim());
-                if (file) list.push({ name: ukrText(li), voice: li.getAttribute('data-voice') || 'UAkino', file: file });
-              });
-              cb(list);
-            }, function () { cb([]); });
-          }
-          playlist(function (list) {
-            if (list.length > 1 || (list.length === 1 && /серія|сезон|\d/i.test(list[0].name) && !pagePlayers.length)) {
-              var byVoice = {}, order = [];
-              list.forEach(function (item) { if (!byVoice[item.voice]) { byVoice[item.voice] = []; order.push(item.voice); } byVoice[item.voice].push(item); });
-              var voices = order.map(function (voice) {
-                var eps = byVoice[voice].map(function (item, i) {
-                  var m = item.name.match(/(\d+)/);
-                  return { title: item.name, number: m ? Number(m[1]) : i + 1, ref: { url: item.file, referer: url } };
-                });
-                return { id: voice, display_name: voice, seasons: [{ title: 'Season 1', season: 1, episodes: eps }] };
-              });
-              return success({ ok: true, type: 'series', title: title, voices: voices });
-            }
-            var players = pagePlayers.slice();
-            list.forEach(function (item) { if (players.indexOf(item.file) === -1) players.push(item.file); });
-            if (!players.length) return fail && fail('no_player');
-            success({ ok: true, type: 'movie', title: title, streams: players.map(function (p, i) { return { title: 'UAkino' + (players.length > 1 ? ' ' + (i + 1) : ''), quality: 'auto', ref: { url: p, referer: url } }; }) });
-          });
-        }, function (why) { if (fail) fail(why); });
-      },
-      stream: function (ref, success, fail) {
-        var url = ukrAbs('uakino', ref && (ref.url || ref.href));
-        if (/\.(m3u8|mp4)(\?|#|$)/i.test(url)) return success({ ok: true, streams: [{ url: url, quality: 'auto' }] });
-        ukrPlayerPage(url, ref && ref.referer, function (html) {
-          var re = /file\s*:\s*["']([^"',]+?)["']/g, m, streams = [], seen = {};
-          while ((m = re.exec(html))) ukrStreamUrls(m[1]).forEach(function (u) { if (!seen[u]) { seen[u] = 1; streams.push({ url: u, quality: 'auto' }); } });
-          var found = html.match(/https?:\/\/[^\s"'<>\\]+?\.m3u8[^\s"'<>\\]*/g) || [];
-          found.forEach(function (u) { if (!seen[u]) { seen[u] = 1; streams.push({ url: u, quality: 'auto' }); } });
-          var sub = (/subtitle\s*:\s*["']([^"']+)["']/.exec(html) || [])[1];
-          if (!streams.length) return fail && fail('no_stream');
-          success({ ok: true, streams: streams, subtitles: sub ? ukrSubtitle(sub) : [] });
-        }, function (why) { if (fail) fail(why); });
-      }
-    },
     eneyida: {
       search: function (params, success, fail) {
         var queries = [params.title, params.original_title].filter(function (v, i, a) { return v && a.indexOf(v) === i; });
