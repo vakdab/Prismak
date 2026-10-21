@@ -842,244 +842,284 @@
     });
   }
 
-  var UASERIALS_CONFIG = {
-    base: 'https://uaserials.com',
-    proxy: 'https://prismak-uaserials-proxy.animegran8.workers.dev/',
-    password: '297796CCB81D255125'
+  /* ====================================================================
+     UAkino + Eneyida: client-side sources (logic ported from
+     CakesTwix/cloudstream-extensions-uk). Both sites sit behind Cloudflare,
+     so they are read ON THE DEVICE (user IP) with a reader fallback.
+     ==================================================================== */
+  var UKR_SITES = {
+    uakino: { name: 'UAkino', base: 'https://uakino.best' },
+    eneyida: { name: 'Eneyida', base: 'https://eneyida.tv' }
+  };
+  var ukr_page_cache = {};
+
+  function ukrAbs(site, url) {
+    if (!url) return '';
+    url = String(url).trim();
+    if (/^https?:\/\//i.test(url)) return url.replace(/^http:\/\//i, 'https://');
+    if (url.indexOf('//') === 0) return 'https:' + url;
+    if (url.charAt(0) === '/') return UKR_SITES[site].base + url;
+    return UKR_SITES[site].base + '/' + url;
+  }
+  function ukrText(node) { return node ? (node.textContent || '').replace(/\s+/g, ' ').trim() : ''; }
+  function ukrDoc(html) {
+    try { return new DOMParser().parseFromString(String(html || ''), 'text/html'); } catch (e) { return null; }
+  }
+  function ukrBlocked(html) {
+    html = String(html || '');
+    return !html || html.length < 400 || /Attention Required!|Just a moment\.\.\.|cf-mitigated|Sorry, you have been blocked/i.test(html.slice(0, 6000));
+  }
+  function ukrBody(response) {
+    if (typeof response == 'string') return response;
+    if (response && typeof response.responseText == 'string') return response.responseText;
+    if (response && typeof response.body == 'string') return response.body;
+    return '';
+  }
+
+  /* Fetch with fallbacks: device -> reader. `post` is a urlencoded string for search. */
+  function ukrRequest(site, url, opt, success, fail) {
+    opt = opt || {};
+    var key = (opt.post ? 'P:' : 'G:') + url + (opt.post || '');
+    if (!opt.nocache && ukr_page_cache[key]) return success(ukr_page_cache[key]);
+    var done = false;
+    function ok(html) { if (done) return; done = true; if (!opt.nocache) ukr_page_cache[key] = html; success(html); }
+    function bad(why) { if (done) return; done = true; if (fail) fail(why); }
+    function viaReader() {
+      if (opt.post) return bad('blocked');
+      var net = new Lampa.Reguest();
+      net.silent('https://r.jina.ai/' + url, function (response) {
+        var html = ukrBody(response);
+        if (ukrBlocked(html)) bad('blocked'); else ok(html);
+      }, function () { bad('network'); }, null, { dataType: 'text', headers: { Accept: 'text/html', 'X-Return-Format': 'html' } });
+    }
+    var headers = { Accept: opt.json ? 'application/json, text/javascript, */*; q=0.01' : 'text/html,application/xhtml+xml', 'Accept-Language': 'uk-UA,uk;q=0.9,en;q=0.7' };
+    if (opt.json) headers['X-Requested-With'] = 'XMLHttpRequest';
+    if (opt.referer) headers.Referer = opt.referer;
+    if (opt.post) headers['Content-Type'] = 'application/x-www-form-urlencoded';
+    var net = new Lampa.Reguest();
+    net.silent(url, function (response) {
+      var html = ukrBody(response);
+      if (ukrBlocked(html) && !opt.json) viaReader(); else ok(html);
+    }, viaReader, opt.post || null, { dataType: 'text', headers: headers, method: opt.post ? 'POST' : 'GET' });
+  }
+
+  /* ---- Tortuga "file" decoder (XOR, first byte = salt) ---- */
+  function ukrTortugaDecode(encoded) {
+    try {
+      var clean = String(encoded || '').replace(/\s/g, '').replace(/=+$/, '');
+      if (!clean) return null;
+      while (clean.length % 4) clean += '=';
+      var bin = atob(clean.replace(/-/g, '+').replace(/_/g, '/'));
+      if (bin.length < 2) return null;
+      var salt = bin.charCodeAt(0) & 255, bytes = [];
+      for (var i = 1; i < bin.length; i++) bytes.push((bin.charCodeAt(i) & 255) ^ ((salt + 7 * (i - 1) + 13) % 256));
+      var text = decodeURIComponent(escape(String.fromCharCode.apply(null, bytes)));
+      return /^https?:\/\//i.test(text) ? text : null;
+    } catch (e) { return null; }
+  }
+  function ukrStreamUrls(raw) {
+    var value = String(raw || '').trim();
+    if (!value) return [];
+    var direct = (value.match(/https?:\/\/[^\s,"'\]]+/g) || []).filter(function (u) { return /\.m3u8|\.mp4|\/vod\//i.test(u); });
+    if (direct.length) return direct;
+    var decoded = ukrTortugaDecode(value);
+    if (decoded) { var urls = decoded.match(/https?:\/\/[^\s,"'\]]+/g); return urls && urls.length ? urls : [decoded]; }
+    return /^https?:\/\//i.test(value) ? [value] : [];
+  }
+  /* JS `file: "..."` value (handles escaped quotes) */
+  function ukrFileValue(script) {
+    var m = /file\s*:\s*(['"])/.exec(script || '');
+    if (!m) return '';
+    var q = m[1], out = '';
+    for (var i = m.index + m[0].length; i < script.length; i++) {
+      var c = script.charAt(i);
+      if (c === '\\' && i + 1 < script.length) { out += script.charAt(i + 1); i++; continue; }
+      if (c === q) break;
+      out += c;
+    }
+    return out;
+  }
+  function ukrSubtitle(raw) {
+    var s = String(raw || ''), e = s.indexOf(']');
+    if (e > 0) return [{ label: s.slice(s.lastIndexOf('[', e) + 1, e), url: s.slice(e + 1) }];
+    return /^https?:\/\//i.test(s) ? [{ label: 'Subtitles', url: s }] : [];
+  }
+  function ukrPlayerPage(url, referer, success, fail) {
+    ukrRequest('uakino', url, { referer: referer }, success, fail);
+  }
+
+  var UkrSites = {
+    uakino: {
+      search: function (params, success, fail) {
+        var queries = [params.title, params.original_title].filter(function (v, i, a) { return v && a.indexOf(v) === i; });
+        var items = [], seen = {}, left = queries.length, failed = 0;
+        if (!left) return success({ ok: true, items: [] });
+        queries.forEach(function (q) {
+          var body = 'do=search&subaction=search&story=' + encodeURIComponent(q).replace(/%20/g, '+');
+          ukrRequest('uakino', UKR_SITES.uakino.base + '/ua/', { post: body, referer: UKR_SITES.uakino.base + '/', nocache: false }, function (html) {
+            var doc = ukrDoc(html);
+            if (doc) Array.prototype.forEach.call(doc.querySelectorAll('div.movie-item.short-item'), function (card) {
+              var a = card.querySelector('a.movie-title, a.full-movie');
+              var href = a && a.getAttribute('href');
+              if (!href || /(\/news\/)|(\/franchise\/)/.test(href) || seen[href]) return;
+              seen[href] = 1;
+              var img = card.querySelector('img');
+              items.push({ title: ukrText(card.querySelector('a.movie-title, div.full-movie-title')) || ukrText(a), poster: ukrAbs('uakino', img && (img.getAttribute('src') || img.getAttribute('data-src'))), ref: { url: ukrAbs('uakino', href), source: 'uakino' } });
+            });
+            if (--left === 0) finish();
+          }, function () { failed++; if (--left === 0) finish(); });
+        });
+        function finish() { if (!items.length && failed === queries.length) return fail && fail('blocked'); success({ ok: true, items: items }); }
+      },
+      content: function (ref, success, fail) {
+        var url = ukrAbs('uakino', ref && (ref.url || ref.href));
+        ukrRequest('uakino', url, { referer: UKR_SITES.uakino.base + '/' }, function (html) {
+          var doc = ukrDoc(html);
+          if (!doc) return fail && fail('parse');
+          var title = ukrText(doc.querySelector('h1 span.solototle')) || ukrText(doc.querySelector('h1'));
+          var holder = doc.querySelector('div.playlists-ajax');
+          var newsId = (holder && holder.getAttribute('data-news_id')) || ((url.split('/').pop() || '').split('-')[0].match(/^\d+$/) || [])[0] || '';
+          var pagePlayers = [];
+          Array.prototype.forEach.call(doc.querySelectorAll('iframe#pre, iframe[data-src], iframe[src]'), function (f) {
+            var u = f.getAttribute('data-src') || f.getAttribute('src');
+            u = ukrAbs('uakino', u);
+            if (u && !/youtube|youtu\.be|trailer/i.test(u) && pagePlayers.indexOf(u) === -1) pagePlayers.push(u);
+          });
+          function playlist(cb) {
+            if (!newsId) return cb([]);
+            var api = UKR_SITES.uakino.base + '/engine/ajax/playlists.php?news_id=' + newsId + '&xfield=playlist';
+            ukrRequest('uakino', api, { json: true, referer: url, nocache: true }, function (text) {
+              var htmlText = text;
+              try { var j = JSON.parse(text); if (j && j.success) htmlText = j.response; else if (j && j.response) htmlText = j.response; } catch (e) {}
+              var pdoc = ukrDoc(htmlText), list = [];
+              if (pdoc) Array.prototype.forEach.call(pdoc.querySelectorAll('div.playlists-videos li'), function (li) {
+                var file = ukrAbs('uakino', (li.getAttribute('data-file') || '').trim());
+                if (file) list.push({ name: ukrText(li), voice: li.getAttribute('data-voice') || 'UAkino', file: file });
+              });
+              cb(list);
+            }, function () { cb([]); });
+          }
+          playlist(function (list) {
+            if (list.length > 1 || (list.length === 1 && /серія|сезон|\d/i.test(list[0].name) && !pagePlayers.length)) {
+              var byVoice = {}, order = [];
+              list.forEach(function (item) { if (!byVoice[item.voice]) { byVoice[item.voice] = []; order.push(item.voice); } byVoice[item.voice].push(item); });
+              var voices = order.map(function (voice) {
+                var eps = byVoice[voice].map(function (item, i) {
+                  var m = item.name.match(/(\d+)/);
+                  return { title: item.name, number: m ? Number(m[1]) : i + 1, ref: { url: item.file, referer: url } };
+                });
+                return { id: voice, display_name: voice, seasons: [{ title: 'Season 1', season: 1, episodes: eps }] };
+              });
+              return success({ ok: true, type: 'series', title: title, voices: voices });
+            }
+            var players = pagePlayers.slice();
+            list.forEach(function (item) { if (players.indexOf(item.file) === -1) players.push(item.file); });
+            if (!players.length) return fail && fail('no_player');
+            success({ ok: true, type: 'movie', title: title, streams: players.map(function (p, i) { return { title: 'UAkino' + (players.length > 1 ? ' ' + (i + 1) : ''), quality: 'auto', ref: { url: p, referer: url } }; }) });
+          });
+        }, function (why) { if (fail) fail(why); });
+      },
+      stream: function (ref, success, fail) {
+        var url = ukrAbs('uakino', ref && (ref.url || ref.href));
+        if (/\.(m3u8|mp4)(\?|#|$)/i.test(url)) return success({ ok: true, streams: [{ url: url, quality: 'auto' }] });
+        ukrPlayerPage(url, ref && ref.referer, function (html) {
+          var re = /file\s*:\s*["']([^"',]+?)["']/g, m, streams = [], seen = {};
+          while ((m = re.exec(html))) ukrStreamUrls(m[1]).forEach(function (u) { if (!seen[u]) { seen[u] = 1; streams.push({ url: u, quality: 'auto' }); } });
+          var found = html.match(/https?:\/\/[^\s"'<>\\]+?\.m3u8[^\s"'<>\\]*/g) || [];
+          found.forEach(function (u) { if (!seen[u]) { seen[u] = 1; streams.push({ url: u, quality: 'auto' }); } });
+          var sub = (/subtitle\s*:\s*["']([^"']+)["']/.exec(html) || [])[1];
+          if (!streams.length) return fail && fail('no_stream');
+          success({ ok: true, streams: streams, subtitles: sub ? ukrSubtitle(sub) : [] });
+        }, function (why) { if (fail) fail(why); });
+      }
+    },
+    eneyida: {
+      search: function (params, success, fail) {
+        var queries = [params.title, params.original_title].filter(function (v, i, a) { return v && a.indexOf(v) === i; });
+        var items = [], seen = {}, left = queries.length, failed = 0;
+        if (!left) return success({ ok: true, items: [] });
+        queries.forEach(function (q) {
+          var body = 'do=search&subaction=search&story=' + encodeURIComponent(q).replace(/%20/g, '+');
+          ukrRequest('eneyida', UKR_SITES.eneyida.base + '/', { post: body, referer: UKR_SITES.eneyida.base + '/' }, function (html) {
+            var doc = ukrDoc(html);
+            if (doc) Array.prototype.forEach.call(doc.querySelectorAll('article.short'), function (card) {
+              var a = card.querySelector('a.short_title'), href = a && a.getAttribute('href');
+              if (!href || seen[href]) return;
+              seen[href] = 1;
+              var img = card.querySelector('a.short_img img');
+              items.push({ title: ukrText(a), poster: ukrAbs('eneyida', img && (img.getAttribute('data-src') || img.getAttribute('src'))), ref: { url: ukrAbs('eneyida', href), source: 'eneyida' } });
+            });
+            if (--left === 0) finish();
+          }, function () { failed++; if (--left === 0) finish(); });
+        });
+        function finish() { if (!items.length && failed === queries.length) return fail && fail('blocked'); success({ ok: true, items: items }); }
+      },
+      content: function (ref, success, fail) {
+        var url = ukrAbs('eneyida', ref && (ref.url || ref.href));
+        ukrRequest('eneyida', url, { referer: UKR_SITES.eneyida.base + '/' }, function (html) {
+          var doc = ukrDoc(html);
+          if (!doc) return fail && fail('parse');
+          var title = ukrText(doc.querySelector('div.full_header-title h1')) || ukrText(doc.querySelector('h1'));
+          var frame = doc.querySelector('.tabs_b.visible iframe') || doc.querySelector('.tabs_b iframe');
+          var playerUrl = frame && ukrAbs('eneyida', frame.getAttribute('src') || frame.getAttribute('data-src'));
+          if (!playerUrl) return fail && fail('no_player');
+          ukrRequest('eneyida', playerUrl, { referer: url }, function (phtml) {
+            var pdoc = ukrDoc(phtml), script = '';
+            if (pdoc) Array.prototype.forEach.call(pdoc.querySelectorAll('script'), function (s) { script += s.textContent + '\n'; });
+            if (!script) script = phtml;
+            var raw = ukrFileValue(script), parsed = null;
+            try { parsed = JSON.parse(raw); } catch (e) {}
+            if (!parsed) {
+              if (/^https?:\/\//i.test(raw)) return success({ ok: true, type: 'movie', title: title, streams: [{ title: 'Eneyida', quality: 'auto', url: raw }] });
+              return fail && fail('no_stream');
+            }
+            if (!Array.isArray(parsed)) parsed = [parsed];
+            // Film: array of voices each with `file`
+            if (parsed.length && parsed[0].file && !parsed[0].folder) {
+              return success({ ok: true, type: 'movie', title: title, streams: parsed.filter(function (d) { return d.file; }).map(function (d) {
+                return { title: d.title || 'Eneyida', quality: 'auto', url: d.file, subtitles: ukrSubtitle(d.subtitle) };
+              }) });
+            }
+            // Series: seasons->voices->episodes OR voices->seasons->episodes
+            var voices = {}, order = [];
+            function addEpisode(voice, season, ep, idx) {
+              if (!ep || !ep.file) return;
+              var vm = voices[voice] || (voices[voice] = { id: voice, display_name: voice, seasons: {} }); if (order.indexOf(voice) === -1) order.push(voice);
+              var sm = vm.seasons[season] || (vm.seasons[season] = []);
+              var n = (String(ep.title || '').match(/(\d+)/) || [])[1];
+              sm.push({ title: ep.title || ('Episode ' + (idx + 1)), number: n ? Number(n) : idx + 1, url: ep.file, subtitle: ep.subtitle });
+            }
+            parsed.forEach(function (lvl1) {
+              (lvl1.folder || []).forEach(function (lvl2) {
+                var l1season = (String(lvl1.title).match(/(\d+)\s*сезон|season\s*(\d+)/i) || null);
+                if (l1season) {
+                  var sn = Number(l1season[1] || l1season[2]);
+                  (lvl2.folder || []).forEach(function (ep, i) { addEpisode(lvl2.title, sn, ep, i); });
+                } else {
+                  var l2season = (String(lvl2.title).match(/(\d+)\s*сезон|season\s*(\d+)/i) || null);
+                  var sn2 = l2season ? Number(l2season[1] || l2season[2]) : 1;
+                  (lvl2.folder || []).forEach(function (ep, i) { addEpisode(lvl1.title, sn2, ep, i); });
+                }
+              });
+            });
+            if (!order.length) return fail && fail('no_stream');
+            success({ ok: true, type: 'series', title: title, voices: order.map(function (name) {
+              var vm = voices[name];
+              return { id: name, display_name: name, seasons: Object.keys(vm.seasons).map(Number).sort(function (a, b) { return a - b; }).map(function (sn) {
+                return { title: 'Season ' + sn, season: sn, episodes: vm.seasons[sn].map(function (e) { return { title: e.title, number: e.number, ref: { url: e.url, direct: true, subtitle: e.subtitle } }; }) };
+              }) };
+            }) });
+          }, function (why) { if (fail) fail(why); });
+        }, function (why) { if (fail) fail(why); });
+      },
+      stream: function (ref, success, fail) {
+        var url = ref && (ref.url || ref.href);
+        if (!url) return fail && fail('no_stream');
+        success({ ok: true, streams: [{ url: url, quality: 'auto' }], subtitles: ukrSubtitle(ref.subtitle) });
+      }
+    }
   };
 
-  function uaserialsAbsoluteUrl(url) {
-    if (!url) return '';
-    if (/^https?:\/\//i.test(url)) return url;
-    return UASERIALS_CONFIG.base + (url.charAt(0) == '/' ? url : '/' + url);
-  }
-  function uaserialsDocument(html) {
-    try { return new window.DOMParser().parseFromString(html, 'text/html'); } catch (e) { return null; }
-  }
-  function uaserialsText(node) { return node ? (node.textContent || '').trim() : ''; }
-  function uaserialsBase64(value) {
-    var binary = atob((value || '').replace(/\s/g, ''));
-    var bytes = new Uint8Array(binary.length);
-    for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    return bytes;
-  }
-  function uaserialsHex(value) {
-    var clean = (value || '').replace(/[^0-9a-f]/gi, '');
-    var bytes = new Uint8Array(Math.floor(clean.length / 2));
-    for (var i = 0; i < bytes.length; i++) bytes[i] = parseInt(clean.substr(i * 2, 2), 16);
-    return bytes;
-  }
-  function uaserialsDecodeTortuga(value) {
-    try {
-      var bytes = uaserialsBase64(value.replace(/-/g, '+').replace(/_/g, '/'));
-      if (bytes.length < 2) return '';
-      var out = new Uint8Array(bytes.length - 1), salt = bytes[0];
-      for (var i = 1; i < bytes.length; i++) out[i - 1] = bytes[i] ^ ((salt + 7 * (i - 1) + 13) % 256);
-      return new TextDecoder().decode(out);
-    } catch (e) { return ''; }
-  }
-  function uaserialsHtml(response) {
-    return typeof response == 'string' ? response : response && (response.responseText || response.body) || '';
-  }
-  function uaserialsUsable(html) {
-    return html && html.length > 200 && html.indexOf('Just a moment') === -1;
-  }
-  function uaserialsRequest(url, success, fail, referer) {
-    var network = new Lampa.Reguest();
-    function viaProxy() {
-      var proxyNetwork = new Lampa.Reguest();
-      var requestUrl = UASERIALS_CONFIG.proxy + '?url=' + encodeURIComponent(url);
-      if (referer) requestUrl += '&referer=' + encodeURIComponent(referer);
-      proxyNetwork.silent(requestUrl, function (response) {
-        success(uaserialsHtml(response));
-      }, fail, null, { dataType: 'text', headers: { Accept: 'text/html,application/xhtml+xml' } });
-    }
-    function viaReader() {
-      var readerNetwork = new Lampa.Reguest();
-      readerNetwork.silent('https://r.jina.ai/' + url, function (response) {
-        var html = uaserialsHtml(response);
-        if (uaserialsUsable(html)) success(html);
-        else viaProxy();
-      }, viaProxy, null, { dataType: 'text', headers: { Accept: 'text/html', 'X-Return-Format': 'html' } });
-    }
-    network.silent(url, function (response) {
-      var html = uaserialsHtml(response);
-      if (uaserialsUsable(html)) success(html);
-      else viaReader();
-    }, viaReader, null, { dataType: 'text', headers: { Accept: 'text/html,application/xhtml+xml' } });
-  }
-  function uaserialsPlayerRefs(pageUrl, success, fail) {
-    var network = new Lampa.Reguest();
-    var requestUrl = UASERIALS_CONFIG.proxy + '?players=1&url=' + encodeURIComponent(pageUrl);
-    network.silent(requestUrl, function (response) {
-      try {
-        var data = typeof response == 'string' ? JSON.parse(response) : response;
-        if (data && data.ok && Array.isArray(data.players)) return success(data.players);
-      } catch (e) {}
-      if (fail) fail(new Error('UASerials player list is unavailable'));
-    }, fail, null, { dataType: 'json' });
-  }
-  function uaserialsDecrypt(payload) {
-    var data = typeof payload == 'string' ? JSON.parse(payload) : payload;
-    var webCrypto = window.crypto && window.crypto.subtle;
-    if (!webCrypto || !data || !data.ciphertext || !data.iv || !data.salt) return Promise.reject(new Error('UASerials AES is unavailable'));
-    var password = new TextEncoder().encode(UASERIALS_CONFIG.password);
-    return webCrypto.importKey('raw', password, { name: 'PBKDF2' }, false, ['deriveBits']).then(function (key) {
-      return webCrypto.deriveBits({ name: 'PBKDF2', salt: uaserialsHex(data.salt), iterations: 999, hash: 'SHA-512' }, key, 256);
-    }).then(function (bits) {
-      return webCrypto.importKey('raw', bits, { name: 'AES-CBC' }, false, ['decrypt']);
-    }).then(function (key) {
-      return webCrypto.decrypt({ name: 'AES-CBC', iv: uaserialsHex(data.iv) }, key, uaserialsBase64(data.ciphertext));
-    }).then(function (buffer) { return new TextDecoder().decode(buffer); });
-  }
-  function uaserialsTag(html) {
-    var doc = uaserialsDocument(html), node = doc && doc.querySelector('[data-tag1]');
-    if (node) return node.getAttribute('data-tag1');
-    var match = String(html || '').match(/data-tag1\s*=\s*["']([^"']+)["']/i);
-    return match ? match[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&') : '';
-  }
-  function uaserialsPlayerUrls(html) {
-    var tag = uaserialsTag(html);
-    if (!tag) return Promise.reject(new Error('UASerials player data not found'));
-    return uaserialsDecrypt(tag).then(function (decoded) {
-      var clean = decoded.replace(/\\/g, '');
-      var start = clean.indexOf('['), end = clean.lastIndexOf(']');
-      if (start < 0 || end < start) throw new Error('UASerials player list is invalid');
-      var tabs = JSON.parse(clean.slice(start, end + 1));
-      return (Array.isArray(tabs) ? tabs : []).filter(function (tab) {
-        return tab && tab.url && !/трейлер|trailer/i.test(tab.tabName || '');
-      }).map(function (tab) { return uaserialsAbsoluteUrl(tab.url); });
-    });
-  }
-  function uaserialsStreamsFromValue(value) {
-    var text = String(value || ''), streams = [], match;
-    var labelled = /\{([^}]+)\}\s*(https?:\/\/.*?)(?=\{[^}]+\}|$)/g;
-    while ((match = labelled.exec(text))) {
-      var hls = match[2].match(/https?:\/\/[^\s,)"]+\.m3u8(?:\?[^\s,)"]*)?/i);
-      if (hls) streams.push({ title: match[1], quality: match[1], url: hls[0] });
-    }
-    if (streams.length) return streams;
-    var direct = text.match(/https?:\/\/[^\s,)"]+\.m3u8(?:\?[^\s,)"]*)?/i);
-    return direct ? [{ title: 'UASerials', quality: 'auto', url: direct[0] }] : [];
-  }
-  function uaserialsResolveToken(token, success, fail) {
-    var encoded = btoa(btoa(String(token || '')));
-    uaserialsRequest('https://get2.fun/point/?method=video_link2&xl=' + encodeURIComponent(encoded), function (response) {
-      try {
-        var decoded = atob(atob(String(response || '').trim()));
-        var streams = uaserialsStreamsFromValue(decoded);
-        if (streams.length) return success(streams);
-      } catch (e) {}
-      fail(new Error('UASerials resolver returned no video URL'));
-    }, fail);
-  }
-      function uaserialsStreamsFromPlayer(url, success, fail, referer, episode) {
-        if (!url) { if (fail) fail(new Error('UASerials player URL is missing')); return; }
-        var resolver = new Lampa.Reguest();
-        var resolverUrl = UASERIALS_CONFIG.proxy + '?resolve=1&url=' + encodeURIComponent(url);
-        if (referer) resolverUrl += '&referer=' + encodeURIComponent(referer);
-        if (episode && episode.season) resolverUrl += '&season=' + encodeURIComponent(episode.season);
-        if (episode && episode.episode) resolverUrl += '&episode=' + encodeURIComponent(episode.episode);
-        if (episode && episode.file) resolverUrl += '&episode_file=' + encodeURIComponent(episode.file);
-    resolver.silent(resolverUrl, function (response) {
-      try {
-        var data = typeof response === 'string' ? JSON.parse(response) : response;
-        if (data && data.ok && Array.isArray(data.streams) && data.streams.length) return success(data.streams);
-        if (fail) fail(new Error(data && data.error || 'UASerials player did not return a video link'));
-      } catch (e) {
-        if (fail) fail(new Error('Invalid response from UASerials proxy'));
-      }
-      }, function () { if (fail) fail(new Error('UASerials proxy request failed')); }, null, { dataType: 'json' });
-      }
-      function uaserialsPlayerStructure(playerUrl, referer, success, fail) {
-        var network = new Lampa.Reguest();
-        var requestUrl = UASERIALS_CONFIG.proxy + '?structure=1&url=' + encodeURIComponent(playerUrl);
-        if (referer) requestUrl += '&referer=' + encodeURIComponent(referer);
-        network.silent(requestUrl, function (response) {
-          try {
-            var data = typeof response == 'string' ? JSON.parse(response) : response;
-            if (data && data.ok && Array.isArray(data.seasons)) return success(data.seasons);
-          } catch (e) {}
-          if (fail) fail(new Error('UASerials player structure is unavailable'));
-        }, fail, null, { dataType: 'json' });
-      }
-  var UASerialsClient = {
-    getSources: function (success) {
-      success({ key: 'uaserials', name: 'UASerials', enabled: true, capabilities: { search: true, content: true, stream: true } });
-    },
-    search: function (params, success, fail) {
-      var query = encodeURIComponent(params.title || params.original_title || '').replace(/%20/g, '+');
-      uaserialsRequest(UASERIALS_CONFIG.base + '/search/' + query + '/', function (html) {
-        var doc = uaserialsDocument(html), items = [];
-        if (doc) Array.prototype.forEach.call(doc.querySelectorAll('.uas-card'), function (card) {
-          var title = uaserialsText(card.querySelector('.uas-card__title'));
-          var original = uaserialsText(card.querySelector('.uas-card__orig'));
-          var posterNode = card.querySelector('.uas-card__img');
-          var poster = posterNode && (posterNode.getAttribute('data-src') || posterNode.getAttribute('src')) || '';
-          items.push({ title: title, title_en: original, poster: uaserialsAbsoluteUrl(poster), ref: { url: uaserialsAbsoluteUrl(card.getAttribute('href')) } });
-        });
-        success({ ok: true, items: items });
-      }, fail);
-    },
-    content: function (ref, success, fail) {
-      var url = uaserialsAbsoluteUrl(ref && (ref.url || ref.href));
-      uaserialsRequest(url, function (html) {
-        var doc = uaserialsDocument(html);
-        var title = uaserialsText(doc && doc.querySelector('.short-title')) || uaserialsText(doc && doc.querySelector('title'));
-        var posterNode = doc && doc.querySelector('div.fimg.img-wide img');
-        var poster = posterNode && (posterNode.getAttribute('src') || posterNode.getAttribute('data-src')) || '';
-        function finishMovie(players) {
-          var streams = players.map(function (player, index) {
-            return { title: index ? 'UASerials ' + (index + 1) : 'UASerials', quality: 'auto', ref: { url: player, referer: url } };
-          });
-          success({ ok: true, type: 'movie', title: title, poster: uaserialsAbsoluteUrl(poster), streams: streams });
-        }
-        function finishSeries(players) {
-          var pending = players.length, structures = [];
-          if (!pending) return finishMovie(players);
-          players.forEach(function (player, playerIndex) {
-            uaserialsPlayerStructure(player, url, function (seasons) {
-              structures[playerIndex] = seasons; pending--;
-              if (!pending) {
-                var valid = structures.filter(function (item) { return Array.isArray(item) && item.length; });
-                if (!valid.length) return finishMovie(players);
-                var voices = valid.map(function (seasons, index) {
-                  var sourcePlayer = players[structures.indexOf(seasons)];
-                  return {
-                    id: sourcePlayer || index,
-                    display_name: index ? 'UASerials ' + (index + 1) : 'UASerials',
-                    seasons: seasons.map(function (season, seasonIndex) {
-                      var seasonNumber = Number(season.season || season.number || seasonIndex + 1);
-                      var rawEpisodes = season.folder || season.episodes || [];
-                      return { title: 'Season ' + seasonNumber, season: seasonNumber, episodes: rawEpisodes.map(function (episode, episodeIndex) {
-                        var episodeNumber = Number(episode.number || episode.episode || episodeIndex + 1);
-                        return { title: episode.title || 'Episode ' + episodeNumber, number: episodeNumber,
-                          ref: { url: sourcePlayer, referer: url, season: seasonNumber, episode: episodeNumber, file: episode.file || '' } };
-                      }) };
-                    })
-                  };
-                });
-                success({ ok: true, type: 'series', title: title, poster: uaserialsAbsoluteUrl(poster), voices: voices });
-              }
-            }, function () {
-              structures[playerIndex] = []; pending--;
-              if (!pending) finishMovie(players);
-            });
-          });
-        }
-        function playersFallback() {
-          uaserialsPlayerRefs(url, function (players) {
-            if (players.length) finishSeries(players);
-            else finishMovie([]);
-          }, function () { finishMovie([]); });
-        }
-        uaserialsPlayerUrls(html).then(function (players) {
-          if (players.length) finishSeries(players);
-          else playersFallback();
-        }).catch(playersFallback);
-      }, fail);
-    }
-  };
 
   var config = {
     api_base: 'https://lampa-uk-proxy.animegran8.workers.dev',
@@ -1125,8 +1165,11 @@
       key: "getSources",
       value: function getSources(success, fail) {
         this.getJson(this.apiBase() + '/sources', function (json) {
-          if (json && Array.isArray(json.sources) && !json.sources.some(function (item) { return item && item.key == 'uaserials'; })) {
-            json.sources.push({ key: 'uaserials', name: 'UASerials', enabled: true, capabilities: { search: true, content: true, stream: true } });
+          if (json && Array.isArray(json.sources)) {
+            json.sources = json.sources.filter(function (item) { return item && item.key != 'uaserials' && !UkrSites[item.key]; });
+            Object.keys(UkrSites).forEach(function (key) {
+              json.sources.push({ key: key, name: UKR_SITES[key].name, enabled: true, capabilities: { search: true, content: true, stream: true } });
+            });
           }
           success(json);
         }, fail);
@@ -1136,7 +1179,7 @@
       value: function search(params, sources, success, fail) {
         var url = this.apiBase() + '/search';
         var sourceKey = Array.isArray(sources) ? sources.join(',') : sources;
-        if (sourceKey == 'uaserials') return UASerialsClient.search(params, success, fail);
+        if (UkrSites[sourceKey]) return UkrSites[sourceKey].search(params, success, fail);
         url = this.addParam(url, 'sources', sourceKey);
         url = this.addParam(url, 'source', sourceKey);
         for (var key in params) url = this.addParam(url, key, params[key]);
@@ -1145,7 +1188,7 @@
     }, {
       key: "getContent",
       value: function getContent(sourceKey, ref, success, fail) {
-        if (sourceKey == 'uaserials') return UASerialsClient.content(ref, success, fail);
+        if (UkrSites[sourceKey]) return UkrSites[sourceKey].content(ref, success, fail);
         var url = this.apiBase() + '/content';
         var data = { source: sourceKey, ref: ref, full: true };
         this.postJson(url, data, success, fail);
@@ -1153,7 +1196,7 @@
     }, {
       key: "getStream",
       value: function getStream(sourceKey, ref, success, fail) {
-        if (sourceKey == 'uaserials') return uaserialsStreamsFromPlayer(ref && (ref.url || ref.href), function (streams) { success({ ok: true, streams: streams }); }, fail, ref && ref.referer, ref);
+        if (UkrSites[sourceKey]) return UkrSites[sourceKey].stream(ref, success, fail);
         var url = this.apiBase() + '/stream';
         var data = { source: sourceKey, ref: ref };
         this.postJson(url, data, success, fail);
@@ -1368,8 +1411,15 @@
       });
     }
     function applyAvailableSources(list) {
-      if (Array.isArray(list) && !list.some(function (item) { return item && item.key == 'uaserials'; })) {
-        list = list.concat([{ key: 'uaserials', name: 'UASerials', enabled: true, capabilities: { search: true, content: true, stream: true } }]);
+      if (Array.isArray(list)) {
+        // UASerials removed; UAkino + Eneyida are resolved on the device (always enabled)
+        list = list.filter(function (item) {
+          var k = item && sourcesStore.normalizeName(item.key || item.name);
+          return k && k != 'uaserials' && !UkrSites[k];
+        });
+        Object.keys(UkrSites).forEach(function (key) {
+          list.push({ key: key, name: UKR_SITES[key].name, enabled: true, capabilities: { search: true, content: true, stream: true } });
+        });
       }
       available_sources = list;
       list.forEach(function (item) {
