@@ -654,7 +654,6 @@
                 return;
               }
 
-              // Determine player type
               var isExternalPlayer = !isInnerPlayer();
               var playlist = [];
               items.forEach(function (elem) {
@@ -673,11 +672,9 @@
                   cell.url = play_url;
                   cell.quality = qualitys;
                 } else if (isExternalPlayer) {
-                  // External player: pre-fetch needed (placeholder until resolved)
                   cell.url = '';
                   cell._prefetch = true;
                 } else {
-                  // Internal player or non-lazy: lazy callback (current behavior)
                   cell.url = function (call) {
                     getStream(elem.ref, function (next_streams) {
                       var prepared_next = prepareStreams(next_streams);
@@ -696,7 +693,6 @@
                 playlist.push(cell);
               });
 
-              // Start playback with unified call
               function startPlayback() {
                 Lampa.Player.play({
                   url: play_url,
@@ -713,7 +709,6 @@
                 });
               }
 
-              // Start immediately. Prefetching every episode made anime wait for dozens of API requests.
               startPlayback();
             }, function (errorText) {
               component.pushError(errorText || Lampa.Lang.translate('online_nolink'));
@@ -942,8 +937,6 @@
       function normalizeStreamUrl(url) {
         if (!url) return url;
         if (!isInnerPlayer()) return url;
-        // AnimeOn/MoonAnime HLS URLs are already CDN-ready. Sending them
-        // through the generic proxy adds another manifest and segment hop.
         if (sourceKey == 'animeon' || sourceKey == 'moonanime' || sourceKey == 'mikai' || sourceKey == 'bambooua' || sourceKey == 'uakino' || isWtchProvider(sourceKey)) return url;
         if (!isProxyEnabled()) return url;
         if (sourceKey === 'sirko') return wrapSirkoProxy(url);
@@ -976,10 +969,8 @@
           return;
         }
 
-        // Some sources already return the playable media URL in the episode ref.
-        // Use it immediately instead of making a second /stream request.
         var direct_url = ref.url || ref.file || ref.stream;
-        if (direct_url && /\.(m3u8|mp4|mkv)(?:[?#]|$)/i.test(String(direct_url))) {
+        if (direct_url && typeof direct_url === 'string' && /\.(m3u8|mp4|mkv)(?:[?#]|$)/i.test(direct_url)) {
           var direct_streams = [{
             url: direct_url,
             quality: ref.quality || 'auto'
@@ -1076,10 +1067,9 @@
   var QR_BODY = 'Подяка автору плагіну BanderaOnline добровільна, на розвиток якого витрачено багато часу та сил.';
   var QR_CARD_POSTER = config.qr_poster;
   function openQrModal() {
-    var html = $('<div class="banderaonline-qr-modal">' + '<style id="banderaonline-qr-style">' + '.banderaonline-qr-modal__content{display:flex;flex-direction:row;gap:1.2em;align-items:center;text-align:center}' + '.banderaonline-qr-modal__info{max-width:28em}' + '.banderaonline-qr-modal__qr{display:flex;flex-direction:column;align-items:center;overflow:hidden}' + '.account-modal-split__qr-code{overflow:hidden;max-width:13em;max-height:13em}' + '.account-modal-split__qr-code svg{display:block;max-width:100%;max-height:100%}' + '.account-modal-split__qr-text{position:relative;z-index:1}' + '@media (max-width: 600px){.banderaonline-qr-modal__content{flex-direction:column}}' + '</style>' + '<div class="banderaonline-qr-modal__content">' + '<div class="account-modal-split__info banderaonline-qr-modal__info">' + //`<div class="account-modal-split__title">${QR_TITLE}</div>` +
+    var html = $('<div class="banderaonline-qr-modal">' + '<style id="banderaonline-qr-style">' + '.banderaonline-qr-modal__content{display:flex;flex-direction:row;gap:1.2em;align-items:center;text-align:center}' + '.banderaonline-qr-modal__info{max-width:28em}' + '.banderaonline-qr-modal__qr{display:flex;flex-direction:column;align-items:center;overflow:hidden}' + '.account-modal-split__qr-code{overflow:hidden;max-width:13em;max-height:13em}' + '.account-modal-split__qr-code svg{display:block;max-width:100%;max-height:100%}' + '.account-modal-split__qr-text{position:relative;z-index:1}' + '@media (max-width: 600px){.banderaonline-qr-modal__content{flex-direction:column}}' + '</style>' + '<div class="banderaonline-qr-modal__content">' + '<div class="account-modal-split__info banderaonline-qr-modal__info">' +
     "<div class=\"account-modal-split__text\"><img src=\"".concat(QR_CARD_POSTER, "\" class=\"banderaonline-qr-modal__img\"><br />").concat(QR_BODY, "</div>") + '</div>' + '<div class="account-modal-split__qr banderaonline-qr-modal__qr">' + '<div class="account-modal-split__qr-code" style="margin-bottom:0;width:13em;height:13em;"></div>' + "<div class=\"account-modal-split__qr-text\">".concat(QR_TEXT, "</div>") + '</div>' + '</div>' + '</div>');
 
-    // Idempotent style check
     if ($('#banderaonline-qr-style').length) {
       html.find('#banderaonline-qr-style').remove();
     }
@@ -1092,7 +1082,6 @@
       Lampa.Utils.qrcode(QR_URL, qrElement, function (error) {
         if (error) console.error(error);
 
-        // Fix sizing race: apply sizing AFTER rendering
         var svg = qrElement.find('svg');
         if (svg[0]) {
           svg[0].style.setProperty('width', '12em', 'important');
@@ -1189,7 +1178,19 @@
       var absolute = data && data.manifest_abs;
       url = /^https?:\/\//i.test(absolute || '') ? absolute : UAKINO_API + (url.charAt(0) === '/' ? '' : '/') + url;
     }
-    if (url && !/\.m3u8(?:$|\?)/i.test(url)) url += '.m3u8';
+    // Only append .m3u8 when extension is truly missing (respect ?query / #hash)
+    if (url && !/\.m3u8(?:$|[?#])/i.test(url)) {
+      var split = url.length;
+      var qIdx = url.indexOf('?');
+      var hIdx = url.indexOf('#');
+      if (qIdx >= 0 && qIdx < split) split = qIdx;
+      if (hIdx >= 0 && hIdx < split) split = hIdx;
+      if (split === url.length) {
+        url += '.m3u8';
+      } else {
+        url = url.slice(0, split) + '.m3u8' + url.slice(split);
+      }
+    }
     return url;
   }
   function uakinoSubtitles(list) {
@@ -1774,7 +1775,6 @@
     var filter_sources = buildFilterSources(object && object.movie);
     var available_sources = sourcesStore.available_sources;
 
-    // TMDB Season Cache
     var tmdb_season_cache = {};
     function escapeHtml(text) {
       if (!text) return '';
@@ -1895,14 +1895,28 @@
     }
     function applyAvailableSources(list) {
       if (!Array.isArray(list)) list = [];
-      var localSources = [{ key: 'uakino', name: 'uakino', display_name: 'UAKino' }];
+      // Register local sources (own implementations) so they always show up
+      // even if the remote /sources endpoint does not include them.
+      var localSources = [
+        { key: 'uakino', name: 'uakino', display_name: 'UAKino' },
+        { key: 'animeon', name: 'animeon', display_name: 'AnimeOn' },
+        { key: 'bambooua', name: 'bambooua', display_name: 'BambooUA' },
+        { key: 'moonanime', name: 'moonanime', display_name: 'MoonAnime' },
+        { key: 'mikai', name: 'mikai', display_name: 'Mikai' },
+        { key: 'starlight', name: 'starlight', display_name: 'Starlight' },
+        { key: 'midnight', name: 'midnight', display_name: 'Midnight' }
+      ];
       Object.keys(WTCH_PROVIDERS).forEach(function (key) { localSources.push({ key: key, name: key, display_name: WTCH_PROVIDERS[key] }); });
       localSources.forEach(function (local) {
         var existing = list.find(function (item) { return item && sourcesStore.normalizeName(item.key || item.name) === local.key; });
-        if (!existing) { existing = { key: local.key, name: local.name }; list.push(existing); }
-        existing.enabled = true;
-        existing.display_name = local.display_name;
-        existing.local = true;
+        if (!existing) {
+          existing = { key: local.key, name: local.name, display_name: local.display_name, enabled: true, local: true };
+          list.push(existing);
+        } else {
+          if (existing.enabled === undefined) existing.enabled = true;
+          if (!existing.display_name) existing.display_name = local.display_name;
+          if (local.key === 'uakino' || WTCH_PROVIDERS[local.key]) existing.local = true;
+        }
       });
       available_sources = list;
       sourcesStore.saveAvailable(list);
@@ -1957,6 +1971,11 @@
       loadAvailableSources(function () {
         filter_sources = buildFilterSources(object && object.movie);
         source = _this.createSource();
+        if (!source) {
+          _this.loading(false);
+          _this.empty();
+          return;
+        }
         filter.onSearch = function (value) {
           Lampa.Activity.replace({
             search: value,
@@ -1970,6 +1989,7 @@
           clearInterval(balanser_timer);
         });
         filter.onSelect = function (type, a, b) {
+          if (!source) return;
           if (type == 'filter') {
             if (a.reset) {
               if (extended) source.reset();else _this.start();
@@ -2005,6 +2025,11 @@
       this.saveChoice(to, balanser_name);
       this.reset();
       source = this.createSource();
+      if (!source) {
+        this.loading(false);
+        this.empty();
+        return;
+      }
       this.search();
     };
     this.createSource = function () {
@@ -2024,17 +2049,15 @@
       return new sources[balanser](this, object);
     };
 
-    /**
-     * Подготовка
-     */
     this.create = function () {
       return this.render();
     };
 
-    /**
-     * Начать поиск
-     */
     this.search = function () {
+      if (!source) {
+        this.loading(false);
+        return this.empty();
+      }
       this.activity.loader(true);
       this.filter({
         source: filter_sources
@@ -2042,6 +2065,7 @@
       this.find();
     };
     this.find = function () {
+      if (!source) return this.doesNotAnswer();
       if (object.movie.imdb_id && source.searchByImdbID) {
         this.extendChoice();
         source.searchByImdbID(object, object.movie.imdb_id);
@@ -2100,10 +2124,6 @@
       Lampa.Storage.set('prismak_choice_' + (for_balanser || balanser), data);
     };
 
-    /**
-     * Есть похожие карточки
-     * @param {Object} json 
-     */
     this.similars = function (json) {
       var _this2 = this;
       json.forEach(function (elem) {
@@ -2162,9 +2182,6 @@
       images = [];
     };
 
-    /**
-     * Очистить список файлов
-     */
     this.reset = function () {
       last = false;
       clearInterval(balanser_timer);
@@ -2174,9 +2191,6 @@
       scroll.clear();
     };
 
-    /**
-     * Загрузка
-     */
     this.loading = function (status) {
       if (status) this.activity.loader(true);else {
         this.activity.loader(false);
@@ -2184,9 +2198,6 @@
       }
     };
 
-    /**
-     * Построить фильтр
-     */
     this.filter = function (filter_items, choice) {
       var _this3 = this;
       var select = [];
@@ -2254,16 +2265,10 @@
       });
     };
 
-    /**
-     * Закрыть фильтр
-     */
     this.closeFilter = function () {
       if ($('body').hasClass('selectbox--open')) Lampa.Select.close();
     };
 
-    /**
-     * Показать что выбрано в фильтре
-     */
     this.selected = function (filter_items) {
       var need = this.getChoice(),
         select = [];
@@ -2297,9 +2302,6 @@
       } else call([]);
     };
 
-    /**
-     * Добавить элементы в список
-     */
     this.append = function (item) {
       item.on('hover:focus', function (e) {
         last = e.target;
@@ -2334,9 +2336,6 @@
       } else body.append('<span>' + Lampa.Lang.translate('online_no_watch_history') + '</span>');
     };
 
-    /**
-     * Отрисовка файлов
-     */
     this.draw = function (items) {
       var _this4 = this;
       var params = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
@@ -2542,9 +2541,6 @@
       });
     };
 
-    /**
-     * Меню
-     */
     this.contextMenu = function (params) {
       params.html.on('hover:long', function () {
         function show(extra) {
@@ -2675,9 +2671,6 @@
       });
     };
 
-    /**
-     * Показать пустой результат
-     */
     this.empty = function (msg) {
       var html = Lampa.Template.get('prismak_does_not_answer', {});
       html.find('.online-empty__buttons').remove();
@@ -2762,9 +2755,6 @@
       return last_episode;
     };
 
-    /**
-     * Начать навигацию по файлам
-     */
     this.start = function () {
       if (Lampa.Activity.active().activity !== this.activity) return;
       if (!initialized) {
@@ -2822,7 +2812,7 @@
     };
   }
 
-  var PLUGIN_STORAGE_KEYS = ['BO_FILMIX_TOKEN', 'BO_FILMIX_DEVICE_ID', 'BO_FILMIX_MAX_QUALITY', 'BO_SOURCES_SORT', 'BO_SOURCES_HIDE', 'prismak_proxy_inner', 'prismak_cw_autoinstall_done', 'prismak_last_balanser', 'prismak_balanser', 'prismak_watched_last', 'prismak_view'];
+  var PLUGIN_STORAGE_KEYS = ['BO_FILMIX_TOKEN', 'BO_FILMIX_DEVICE_ID', 'BO_FILMIX_MAX_QUALITY', 'BO_SOURCES', 'BO_SOURCES_SORT', 'BO_SOURCES_HIDE', 'prismak_proxy_inner', 'prismak_cw_autoinstall_done', 'prismak_last_balanser', 'prismak_balanser'];
   var FILMIX_POLL_INTERVAL = 10000;
   var FILMIX_MAX_QUALITY_KEY = 'BO_FILMIX_MAX_QUALITY';
   var AUTH_KEYS = getAuthKeys();
@@ -3164,9 +3154,6 @@
       wrapper.empty().append(actions).append(list);
     }
 
-    // Refresh the cached sources list from the server, then render the modal once.
-    // A failed or malformed response falls back silently to the cached list.
-    // ponytail: a dead network stalls this until the default request timeout; pass a shorter timeout if that is too long.
     function loadSources() {
       Lampa.Loading.start();
       api_client.getSources(function (json) {
@@ -3339,7 +3326,6 @@
       type: 'video',
       version: '2.9.5',
       name: 'Prismak',
-      //description: 'Плагин для просмотра онлайн сериалов и фильмов',
       component: 'prismak',
       onContextMenu: function onContextMenu(object) {
         return {
@@ -3683,14 +3669,14 @@
     if (!$('#prismak_style').length) {
       $('body').append(Lampa.Template.get('prismak_css', {}, true));
     }
-    var button = "<div class=\"full-start__button selector view--online view--bandera-online\" data-subtitle=\"Prismak V".concat("0.0.1", "\">\n        <svg viewBox=\"0 0 28 28\" width=\"28\" height=\"28\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\"><image x=\"0\" y=\"0\" width=\"28\" height=\"28\" preserveAspectRatio=\"xMidYMid meet\" href=\"https://files.manuscdn.com/user_upload_by_module/session_file/310519663663445039/DBzSvOiyOEBjzxtL.png\" xlink:href=\"https://files.manuscdn.com/user_upload_by_module/session_file/310519663663445039/DBzSvOiyOEBjzxtL.png\"/></svg>\n        <span>𝗣𝗿𝗶𝘀𝗺𝗮𝗸</span>\n    </div>");
+    var button = "<div class=\"full-start__button selector view--online view--bandera-online\" data-subtitle=\"Prismak V2.9.5\">\n        <svg viewBox=\"0 0 28 28\" width=\"28\" height=\"28\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\"><image x=\"0\" y=\"0\" width=\"28\" height=\"28\" preserveAspectRatio=\"xMidYMid meet\" href=\"https://files.manuscdn.com/user_upload_by_module/session_file/310519663663445039/DBzSvOiyOEBjzxtL.png\" xlink:href=\"https://files.manuscdn.com/user_upload_by_module/session_file/310519663663445039/DBzSvOiyOEBjzxtL.png\"/></svg>\n        <span>𝗣𝗿𝗶𝘀𝗺𝗮𝗸</span>\n    </div>";
     Lampa.Component.add('prismak', component);
     resetTemplates();
     Lampa.Listener.follow('full', function (e) {
       if (e.type == 'complite') {
         var render = e.object.activity.render();
         if (!render || render.find('.view--bandera-online').length) return;
-        var btn = $(Lampa.Lang.translate(button));
+        var btn = $(button);
         btn.on('hover:enter', function () {
           resetTemplates();
           Lampa.Component.add('prismak', component);
@@ -3708,6 +3694,8 @@
         render.find('.view--torrent').after(btn);
       }
     });
+    // Initialize plugin settings menu (CRITICAL: without this, settings are not registered)
+    try { initSettings(); } catch (err) { console.error('[Prismak] initSettings error:', err); }
   }
   if (Lampa.Manifest.app_digital >= 155 && !window.prismak_uakino_v001) { window.prismak_uakino_v001 = true; startPlugin(); }
 
