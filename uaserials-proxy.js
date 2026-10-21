@@ -149,6 +149,30 @@ function extractStreams(value) {
   return found;
 }
 
+function extractPlayerValue(html) {
+  const text = String(html || '');
+  const direct = extractStreams(text);
+  if (direct.length) return direct.map(stream => stream.url).join(';');
+  const patterns = [
+    /(?:file|source|src|playlist|video|url)\s*[:=]\s*['"]([^'"]+)['"]/ig,
+    /data-(?:file|source|src|playlist|url)\s*=\s*['"]([^'"]+)['"]/ig
+  ];
+  for (const pattern of patterns) {
+    const values = [];
+    let match;
+    while ((match = pattern.exec(text))) values.push(match[1]);
+    if (values.length) return values.join(';');
+  }
+  return '';
+}
+
+function decodePlayerValue(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (/^https?:\/\//i.test(raw)) return raw;
+  return decodeFile(raw) || raw;
+}
+
 function getSigningKey() {
   const secret = globalThis.STREAM_SIGNING_KEY;
   if (typeof secret !== 'string' || secret.length < 32) throw new Error('HLS proxy signing key is not configured');
@@ -308,12 +332,11 @@ async function handle(request) {
     }
     if (query.get('resolve') === '1') {
       const html = await upstream.text();
-      const match = html.match(/file\s*[:=]\s*['"]([^'"]+)['"]/i);
-      if (!match) return json({ ok: false, error: 'Player file not found', upstreamStatus: upstream.status });
-      const file = match[1];
-      const decoded = /^https?:\/\//i.test(file) ? file : decodeFile(file);
+      const file = extractPlayerValue(html);
+      if (!file) return json({ ok: false, error: 'Player file not found', upstreamStatus: upstream.status });
+      const decoded = file.split(';').map(decodePlayerValue).join(';');
       const found = extractStreams(decoded);
-      if (!found.length) return json({ ok: false, error: 'HLS URL not found', upstreamStatus: upstream.status });
+      if (!found.length) return json({ ok: false, error: 'HLS URL not found', upstreamStatus: upstream.status, playerStatus: upstream.status });
       const host = target.hostname.toLowerCase();
       const hlsReferer = host.endsWith('.wtf') ? 'https://tortuga.wtf/' : 'https://tortuga.tw/';
       const streams = await Promise.all(found.map(async stream => ({
