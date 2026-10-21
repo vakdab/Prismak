@@ -807,13 +807,27 @@
       return new TextDecoder().decode(out);
     } catch (e) { return ''; }
   }
+  function uaserialsHtml(response) {
+    return typeof response == 'string' ? response : response && (response.responseText || response.body) || '';
+  }
+  function uaserialsUsable(html) {
+    return html && html.length > 200 && html.indexOf('Just a moment') === -1;
+  }
   function uaserialsRequest(url, success, fail, referer) {
     var network = new Lampa.Reguest();
-    var requestUrl = UASERIALS_CONFIG.proxy + '?url=' + encodeURIComponent(url);
-    if (referer) requestUrl += '&referer=' + encodeURIComponent(referer);
-    network.silent(requestUrl, function (response) {
-      success(typeof response == 'string' ? response : response && (response.responseText || response.body) || '');
-    }, fail, null, { dataType: 'text', headers: { Accept: 'text/html,application/xhtml+xml' } });
+    function viaProxy() {
+      var proxyNetwork = new Lampa.Reguest();
+      var requestUrl = UASERIALS_CONFIG.proxy + '?url=' + encodeURIComponent(url);
+      if (referer) requestUrl += '&referer=' + encodeURIComponent(referer);
+      proxyNetwork.silent(requestUrl, function (response) {
+        success(uaserialsHtml(response));
+      }, fail, null, { dataType: 'text', headers: { Accept: 'text/html,application/xhtml+xml' } });
+    }
+    network.silent(url, function (response) {
+      var html = uaserialsHtml(response);
+      if (uaserialsUsable(html)) success(html);
+      else viaProxy();
+    }, viaProxy, null, { dataType: 'text', headers: { Accept: 'text/html,application/xhtml+xml' } });
   }
   function uaserialsPlayerRefs(pageUrl, success, fail) {
     var network = new Lampa.Reguest();
@@ -974,15 +988,16 @@
             });
           });
         }
-        function fallbackPlayers() {
-          uaserialsPlayerUrls(html).then(finishMovie).catch(function () { finishMovie([]); });
+        function playersFallback() {
+          uaserialsPlayerRefs(url, function (players) {
+            if (players.length) finishSeries(players);
+            else finishMovie([]);
+          }, function () { finishMovie([]); });
         }
-        uaserialsPlayerRefs(url, function (players) {
+        uaserialsPlayerUrls(html).then(function (players) {
           if (players.length) finishSeries(players);
-          else fallbackPlayers();
-        }, function () {
-          fallbackPlayers();
-        });
+          else playersFallback();
+        }).catch(playersFallback);
       }, fail);
     }
   };
