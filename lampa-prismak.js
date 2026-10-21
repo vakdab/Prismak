@@ -867,26 +867,15 @@
   }
   function uaserialsStreamsFromPlayer(url, success, fail) {
     if (/\.m3u8(?:\?|$)/i.test(url)) return success([{ title: 'UASerials', quality: 'auto', url: url }]);
-    uaserialsRequest(url, function (html) {
-      var file = String(html).match(/file\s*[:=]\s*["']([^"']+)["']/i);
-      var subtitle = String(html).match(/subtitle\s*[:=]\s*["']([^"']+)["']/i);
-      if (!file) return fail(new Error('UASerials stream token not found'));
-      var token = file[1], decoded = token.indexOf('http') === 0 ? token : uaserialsDecodeTortuga(token);
-      var streams = uaserialsStreamsFromValue(decoded);
-      if (!streams.length && token.indexOf('http') !== 0) {
-        return uaserialsResolveToken(token, function (resolved) {
-          success(resolved);
-        }, fail);
-      }
-      if (!streams.length) return fail(new Error('UASerials stream not found'));
-      var subtitles = [];
-      if (subtitle && subtitle[1]) {
-        var sub = subtitle[1].indexOf('http') === 0 ? subtitle[1] : uaserialsDecodeTortuga(subtitle[1]);
-        if (sub) subtitles.push({ label: 'Українська', language: 'uk', url: sub });
-      }
-      streams.forEach(function (stream) { stream.subtitles = subtitles; });
-      success(streams);
-    }, fail);
+    var resolver = new Lampa.Reguest();
+    var resolverUrl = UASERIALS_CONFIG.proxy + '?resolve=1&url=' + encodeURIComponent(url);
+    resolver.silent(resolverUrl, function (response) {
+      try {
+        var data = typeof response === 'string' ? JSON.parse(response) : response;
+        if (data && data.ok && Array.isArray(data.streams) && data.streams.length) return success(data.streams);
+      } catch (e) {}
+      fail(new Error('UASerials player did not return a video link'));
+    }, function () { fail(new Error('UASerials player request failed')); });
   }
   var UASerialsClient = {
     getSources: function (success) {
