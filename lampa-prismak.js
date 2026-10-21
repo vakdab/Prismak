@@ -1848,7 +1848,7 @@
       $('body').append(Lampa.Template.get('onlineua_css', {}, true));
     }
 
-    var button = "<div class=\"full-start__button selector view--online view--onlineua\" data-subtitle=\"[Free] OnlineUA v".concat(manifest.version, "\">\n        <svg viewBox=\"0 -4 28 28\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\"><g id=\"SVGRepo_bgCarrier\" stroke-width=\"0\"></g><g id=\"SVGRepo_tracerCarrier\" stroke-linecap=\"round\" stroke-linejoin=\"round\"></g><g id=\"SVGRepo_iconCarrier\"><g clip-path=\"url(#clip0_503_2809)\"><rect width=\"28\" height=\"20\" rx=\"2\" fill=\"white\"></rect><mask id=\"mask0_503_2809\" style=\"mask-type:alpha\" maskUnits=\"userSpaceOnUse\" x=\"0\" y=\"0\" width=\"28\" height=\"20\"><rect width=\"28\" height=\"20\" rx=\"2\" fill=\"white\"></rect></mask><g mask=\"url(#mask0_503_2809)\"><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M0 10.6667H28V0H0V10.6667Z\" fill=\"#156DD1\"></path><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M0 20H28V10.6667H0V20Z\" fill=\"#FFD948\"></path></g></g><defs><clipPath id=\"clip0_503_2809\"><rect width=\"28\" height=\"20\" rx=\"2\" fill=\"white\"></rect></clipPath></defs></g></svg>\n        <span>OnlineUA</span>\n    </div>";
+    var button = '<div class="full-start__button selector view--online view--onlineua" data-subtitle="[Free] OnlineUA ' + manifest.version + '"><span>OnlineUA</span></div>';
 
     Lampa.Component.add('onlineua', component);
     resetTemplates();
