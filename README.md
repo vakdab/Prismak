@@ -13,7 +13,7 @@ https://cdn.jsdelivr.net/gh/vakdab/Prismak@main/lampa-prismak.js
 Зафіксована версія:
 
 ```text
-https://cdn.jsdelivr.net/gh/vakdab/Prismak@6ba3e7e8ca4828220849571f7418e8e3f15d6e60/lampa-prismak.js
+https://cdn.jsdelivr.net/gh/vakdab/Prismak@a9d09f6b2a3a2f50c85b5f655588374acc040a14/lampa-prismak.js
 ```
 
 Плагін призначений для використання окремо. Якщо Prismak уже вбудований у ваш комбінований плагін, повторно додавати його не потрібно.
