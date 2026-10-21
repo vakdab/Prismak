@@ -351,7 +351,7 @@
             loadContent(aggregated_moonanime.ref);
             return;
           }
-          if (items.length > 1 && !object.clarification) {
+          if (items.length > 1 && sourceKey != 'eneyida' && !object.clarification) {
             component.similars(items.map(function (item) {
               return {
                 id: item.ref && (item.ref.id || item.ref.href || item.ref.url || item.ref.play) || item.title,
