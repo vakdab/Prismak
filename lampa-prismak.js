@@ -738,8 +738,10 @@
             next.subtitles = stream_subtitles;
             return next;
           });
-          stream_cache[cache_key] = streams;
-          success(streams);
+          resolveEmbedStreams(streams, function (resolved) {
+            stream_cache[cache_key] = resolved;
+            success(resolved);
+          });
         }, function () { if (fail) fail(); });
       }
       function getMovieStream(movie, success, fail) {
@@ -758,7 +760,7 @@
         }
         if (movie.streams && movie.streams.length) {
           var direct = movie.streams.filter(function (s) { return s && s.url; });
-          if (direct.length) { success(prepareStreams(direct)); return; }
+          if (direct.length) { resolveEmbedStreams(direct, function (resolved) { success(prepareStreams(resolved)); }); return; }
           var ref = movie.streams[0] && movie.streams[0].ref;
           if (ref) {
             getStream(ref, function (streams) { success(prepareStreams(streams)); },
@@ -769,6 +771,75 @@
         success({ first: null, qualitys: {} });
       }
     };
+  }
+
+
+  /* ---- Embed player resolver (fenixplay / tortuga): page -> direct m3u8, runs on the device ---- */
+  var EMBED_HOSTS = /^https?:\/\/(?:[a-z0-9-]+\.)?(?:fenixplay\.xyz|tortuga\.tw)\//i;
+  var embed_cache = {};
+  function isEmbedPage(url) { return !!url && EMBED_HOSTS.test(url) && !/\.(m3u8|mp4|webm)(\?|#|$)/i.test(url); }
+  function embedFetch(url, success, fail) {
+    var clean = String(url).split('#')[0];
+    function viaReader() {
+      var net = new Lampa.Reguest();
+      net.silent('https://r.jina.ai/' + clean, function (response) {
+        var html = typeof response == 'string' ? response : response && (response.responseText || response.body) || '';
+        if (html && html.length > 200) success(html); else fail();
+      }, fail, null, { dataType: 'text', headers: { Accept: 'text/html', 'X-Return-Format': 'html' } });
+    }
+    var direct = new Lampa.Reguest();
+    direct.silent(clean, function (response) {
+      var html = typeof response == 'string' ? response : response && (response.responseText || response.body) || '';
+      if (html && html.length > 200 && html.indexOf('404 Not Found') === -1) success(html); else viaReader();
+    }, viaReader, null, { dataType: 'text' });
+  }
+  function embedExtract(html, pageUrl) {
+    var streams = [], seen = {};
+    function push(url, title, quality) {
+      url = String(url || '').replace(/\\\//g, '/').replace(/&amp;/g, '&');
+      if (!url || seen[url] || !/^https?:\/\//i.test(url)) return;
+      seen[url] = 1; streams.push({ title: title || 'auto', quality: quality || 'auto', url: url });
+    }
+    var playlist = html.match(/window\.FENIX_PLAYLIST\s*=\s*(\{[\s\S]*?\});\s*\n/);
+    if (playlist) {
+      try {
+        var data = JSON.parse(playlist[1]);
+        var wanted = (pageUrl.match(/[#&?]ep=(\d+)/) || [])[1];
+        var eps = (data.episodes || []).concat(data.mini_episodes || []);
+        var episode = null;
+        eps.forEach(function (e) { if (!episode && wanted && String(e.number) === String(wanted)) episode = e; });
+        episode = episode || eps[0];
+        if (episode) {
+          (episode.tracks || []).forEach(function (t) { push(t.hls_url, t.label || 'auto', 'auto'); });
+          if (!streams.length) push(episode.hls_master_url, 'auto', 'auto');
+        }
+      } catch (e) {}
+    }
+    if (!streams.length) {
+      var re = /https?:\/\/[^\s"'<>\\]+?\.m3u8(?:\?[^\s"'<>\\]*)?/gi, m;
+      while ((m = re.exec(html))) push(m[0], 'auto', 'auto');
+    }
+    return streams;
+  }
+  function resolveEmbedStreams(streams, success) {
+    var list = Array.isArray(streams) ? streams : [];
+    var pending = list.filter(function (s) { return s && isEmbedPage(s.url); });
+    if (!pending.length) return success(list);
+    var out = list.filter(function (s) { return !(s && isEmbedPage(s.url)); });
+    var left = pending.length;
+    function done() { if (--left === 0) success(out.length ? out : list); }
+    pending.forEach(function (stream) {
+      var key = stream.url;
+      if (embed_cache[key]) { out = out.concat(embed_cache[key]); return done(); }
+      embedFetch(key, function (html) {
+        var found = embedExtract(html, key);
+        if (found.length) {
+          found = found.map(function (f) { var n = {}; Lampa.Arrays.extend(n, stream, true); n.url = f.url; n.title = f.title && f.title !== 'auto' ? f.title : stream.title; n.quality = f.quality || stream.quality; return n; });
+          embed_cache[key] = found; out = out.concat(found);
+        }
+        done();
+      }, function () { done(); });
+    });
   }
 
   var UASERIALS_CONFIG = {
