@@ -843,19 +843,49 @@
       }).map(function (tab) { return uaserialsAbsoluteUrl(tab.url); });
     });
   }
+  function uaserialsStreamsFromValue(value) {
+    var text = String(value || ''), streams = [], match;
+    var labelled = /\{([^}]+)\}\s*(https?:\/\/.*?)(?=\{[^}]+\}|$)/g;
+    while ((match = labelled.exec(text))) {
+      var hls = match[2].match(/https?:\/\/[^\s,)"]+\.m3u8(?:\?[^\s,)"]*)?/i);
+      if (hls) streams.push({ title: match[1], quality: match[1], url: hls[0] });
+    }
+    if (streams.length) return streams;
+    var direct = text.match(/https?:\/\/[^\s,)"]+\.m3u8(?:\?[^\s,)"]*)?/i);
+    return direct ? [{ title: 'UASerials', quality: 'auto', url: direct[0] }] : [];
+  }
+  function uaserialsResolveToken(token, success, fail) {
+    var encoded = btoa(btoa(String(token || '')));
+    uaserialsRequest('https://get2.fun/point/?method=video_link2&xl=' + encodeURIComponent(encoded), function (response) {
+      try {
+        var decoded = atob(atob(String(response || '').trim()));
+        var streams = uaserialsStreamsFromValue(decoded);
+        if (streams.length) return success(streams);
+      } catch (e) {}
+      fail(new Error('UASerials resolver returned no video URL'));
+    }, fail);
+  }
   function uaserialsStreamsFromPlayer(url, success, fail) {
     if (/\.m3u8(?:\?|$)/i.test(url)) return success([{ title: 'UASerials', quality: 'auto', url: url }]);
     uaserialsRequest(url, function (html) {
       var file = String(html).match(/file\s*[:=]\s*["']([^"']+)["']/i);
       var subtitle = String(html).match(/subtitle\s*[:=]\s*["']([^"']+)["']/i);
-      var stream = file && (file[1].indexOf('http') === 0 ? file[1] : uaserialsDecodeTortuga(file[1]));
-      if (!stream) return fail(new Error('UASerials stream not found'));
+      if (!file) return fail(new Error('UASerials stream token not found'));
+      var token = file[1], decoded = token.indexOf('http') === 0 ? token : uaserialsDecodeTortuga(token);
+      var streams = uaserialsStreamsFromValue(decoded);
+      if (!streams.length && token.indexOf('http') !== 0) {
+        return uaserialsResolveToken(token, function (resolved) {
+          success(resolved);
+        }, fail);
+      }
+      if (!streams.length) return fail(new Error('UASerials stream not found'));
       var subtitles = [];
       if (subtitle && subtitle[1]) {
         var sub = subtitle[1].indexOf('http') === 0 ? subtitle[1] : uaserialsDecodeTortuga(subtitle[1]);
         if (sub) subtitles.push({ label: 'Українська', language: 'uk', url: sub });
       }
-      success([{ title: 'UASerials', quality: 'auto', url: stream, subtitles: subtitles }]);
+      streams.forEach(function (stream) { stream.subtitles = subtitles; });
+      success(streams);
     }, fail);
   }
   var UASerialsClient = {
