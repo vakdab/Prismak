@@ -1210,15 +1210,17 @@
       var movie = ref && (ref.movie || ref.id);
       if (!movie) return fail && fail('no_stream');
       uakinoResolveAny(movie, ref, function (r) {
-        var list = [];
-        // 720p first: starts fast on mobile networks; 1080p / 480p are in the quality menu
+        // Always start with the signed master playlist. It is the canonical HLS
+        // entry point and is more compatible with Android/TV native players than
+        // opening a tokenized variant playlist directly. Variants remain in the
+        // quality menu for players that support explicit quality selection.
+        var list = [{ title: 'auto', quality: 'auto', url: r.master, hls_type: 'hlsjs' }];
         var pref = [720, 1080, 480], used = {};
         pref.forEach(function (h) {
           var v = r.variants.filter(function (x) { return x.h === h; })[0];
           if (v) { used[h] = 1; list.push({ title: h + 'p', quality: h + 'p', url: v.url, hls_type: 'hlsjs' }); }
         });
         r.variants.forEach(function (v) { if (!used[v.h]) list.push({ title: (v.h || 'auto') + 'p', quality: (v.h || 'auto') + 'p', url: v.url, hls_type: 'hlsjs' }); });
-        if (!list.length) list.push({ title: 'auto', quality: 'auto', url: r.master, hls_type: 'hlsjs' });
         var res = { ok: true, streams: list, subtitles: uakinoSubs(r.play) };
         if (r.switched) {
           res.message = 'Озвучка ' + (ref.voice || '') + ' недоступна, увімкнено ' + (r.voice || '');
