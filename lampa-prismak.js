@@ -496,7 +496,8 @@
                   subtitles: elem.subtitles || [], mark: elem.mark,
                   season: elem.season || elem.ref && elem.ref.season,
                   episode: elem.episode || elem.ref && elem.ref.episode,
-                  voice_name: elem.voice_name, voice_id: elem.voice_id
+                  voice_name: elem.voice_name, voice_id: elem.voice_id,
+                  hls_type: first.hls_type || 'hlsjs'
                 };
                 if (elem === item) {
                   cell.url = play_url; cell.quality = qualitys;
@@ -521,6 +522,7 @@
                   url: play_url, timeline: item.timeline, quality: qualitys,
                   title: item.title, subtitles: mergeSubtitles(first.subtitles, item.subtitles),
                   season: item.season, episode: item.episode, voice_name: item.voice_name,
+                  hls_type: first.hls_type || 'hlsjs',
                   playlist: playlist, isonline: true
                 });
               }
@@ -562,7 +564,7 @@
               var qualitys = prepared.qualitys;
               var play_url = first ? first.url : '';
               if (!first || !play_url) { component.pushError(Lampa.Lang.translate('online_nolink')); return; }
-              call(_objectSpread2(_objectSpread2({ file: play_url, quality: qualitys },
+              call(_objectSpread2(_objectSpread2({ file: play_url, quality: qualitys, hls_type: first.hls_type || 'hlsjs' },
                 item.season != null ? { season: item.season } : {}),
                 item.episode != null ? { episode: item.episode } : {}));
             }, function (errorText) { component.pushError(errorText || Lampa.Lang.translate('online_nolink')); });
@@ -581,7 +583,7 @@
               if (!first || !play_url) { component.pushError(Lampa.Lang.translate('online_nolink')); return; }
               Lampa.Player.play({
                 url: play_url, timeline: movie.timeline, quality: qualitys,
-                title: movie.player_title || movie.title,
+                title: movie.player_title || movie.title, hls_type: first.hls_type || 'hlsjs',
                 subtitles: mergeSubtitles(first.subtitles, movie.subtitles)
               });
               Lampa.Player.playlist([]);
@@ -593,7 +595,7 @@
               var qualitys = prepared.qualitys;
               var play_url = first ? first.url : '';
               if (!first || !play_url) { component.pushError(Lampa.Lang.translate('online_nolink')); return; }
-              call({ file: play_url, quality: qualitys });
+              call({ file: play_url, quality: qualitys, hls_type: first.hls_type || 'hlsjs' });
             }, function (errorText) { component.pushError(errorText || Lampa.Lang.translate('online_nolink')); });
           }
         });
