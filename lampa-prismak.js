@@ -1122,26 +1122,14 @@
       success(p);
     }, fail, true);
   }
-  // Is this voice/episode really playable? uakino.ax answers play=200 even when the file host is down, only the master 502s.
+  // Keep the signed manifest untouched. Loading it here and then loading it
+  // again in Lampa's HLS.js parser is an unnecessary preflight and can make a
+  // tokenized playlist fail on some WebViews.
   function uakinoResolve(movie, opt, success, fail) {
     uakinoPlay(movie, opt, function (p) {
-      var master = uakinoM3u8(p.manifest || p.manifest_abs);
-      uakinoText(master, function (text) {
-        // The signed manifest is already a valid player URL. On some WebViews
-        // a direct preflight is blocked by CORS even though playback is allowed.
-        // Only reject an explicit non-playlist response; keep the master URL as
-        // a fallback when the response is opaque/empty.
-        if (!String(text).trim()) return success({ play: p, master: master, variants: [] });
-        if (String(text).indexOf('#EXTM3U') !== 0) return fail && fail('broken');
-        var variants = uakinoVariants(master, text);
-        success({ play: p, master: master, variants: variants });
-      }, function (status) {
-        // status=0 is normally a WebView CORS/network visibility error. Do not
-        // discard a freshly signed manifest in that case; the player can fetch
-        // it directly. HTTP errors still trigger the alternate-voice fallback.
-        if (!status) return success({ play: p, master: master, variants: [] });
-        fail && fail('broken');
-      });
+      var master = uakinoM3u8(p.manifest_abs || p.manifest);
+      if (!master) return fail && fail('no_manifest');
+      success({ play: p, master: master, variants: [] });
     }, function () { fail && fail('play'); });
   }
   // The voice list of a series is what the service advertises, but a voice hosted on a dead file host cannot play.
@@ -1210,17 +1198,9 @@
       var movie = ref && (ref.movie || ref.id);
       if (!movie) return fail && fail('no_stream');
       uakinoResolveAny(movie, ref, function (r) {
-        // Always start with the signed master playlist. It is the canonical HLS
-        // entry point and is more compatible with Android/TV native players than
-        // opening a tokenized variant playlist directly. Variants remain in the
-        // quality menu for players that support explicit quality selection.
+        // Start with the signed master playlist. Lampa's HLS parser will load
+        // the variants itself, avoiding a second request for tokenized URLs.
         var list = [{ title: 'auto', quality: 'auto', url: r.master, hls_type: 'hlsjs' }];
-        var pref = [720, 1080, 480], used = {};
-        pref.forEach(function (h) {
-          var v = r.variants.filter(function (x) { return x.h === h; })[0];
-          if (v) { used[h] = 1; list.push({ title: h + 'p', quality: h + 'p', url: v.url, hls_type: 'hlsjs' }); }
-        });
-        r.variants.forEach(function (v) { if (!used[v.h]) list.push({ title: (v.h || 'auto') + 'p', quality: (v.h || 'auto') + 'p', url: v.url, hls_type: 'hlsjs' }); });
         var res = { ok: true, streams: list, subtitles: uakinoSubs(r.play) };
         if (r.switched) {
           res.message = 'Озвучка ' + (ref.voice || '') + ' недоступна, увімкнено ' + (r.voice || '');
