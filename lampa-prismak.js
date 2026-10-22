@@ -1090,11 +1090,55 @@
   function uakinoSubs(p) {
     return (p && p.subs || []).filter(function (s) { return s && s.url; }).map(function (s) { return { label: s.label || 'UA', url: s.url }; });
   }
+  function uakinoText(url, success, fail) {
+    var net = new Lampa.Reguest();
+    net.silent(url, function (t) { success(typeof t == 'string' ? t : (t && t.responseText) || ''); },
+      function (e) { fail && fail(e && e.status || 0); }, null, { dataType: 'text' });
+  }
+  // master playlist -> [{ h: 1080, url: absolute variant url }] (best first). Variant URLs are relative to the CDN host.
+  function uakinoVariants(masterUrl, text) {
+    var lines = String(text || '').split(/\r?\n/), out = [], base;
+    try { base = new URL(masterUrl); } catch (e) { return out; }
+    for (var i = 0; i < lines.length; i++) {
+      if (lines[i].indexOf('#EXT-X-STREAM-INF') !== 0 || !lines[i + 1]) continue;
+      var res = /RESOLUTION=\d+x(\d+)/.exec(lines[i]), bw = /BANDWIDTH=(\d+)/.exec(lines[i]);
+      var abs; try { abs = new URL(lines[i + 1].trim(), base).href; } catch (e) { continue; }
+      out.push({ h: res ? parseInt(res[1], 10) : 0, bw: bw ? parseInt(bw[1], 10) : 0, url: abs });
+    }
+    return out.sort(function (a, b) { return b.h - a.h || b.bw - a.bw; });
+  }
   function uakinoPlay(movie, opt, success, fail) {
     uakinoApi('/hls/api/play', { movie: movie, s: uakinoSid(), hevc: uakinoHevc(), voice: opt.voice, season: opt.season, episode: opt.episode, q: opt.q }, function (p) {
       if (!p || !(p.manifest || p.manifest_abs)) return fail && fail('no_stream');
       success(p);
     }, fail, true);
+  }
+  // Is this voice/episode really playable? uakino.ax answers play=200 even when the file host is down, only the master 502s.
+  function uakinoResolve(movie, opt, success, fail) {
+    uakinoPlay(movie, opt, function (p) {
+      var master = uakinoM3u8(p.manifest || p.manifest_abs);
+      uakinoText(master, function (text) {
+        if (String(text).indexOf('#EXTM3U') !== 0) return fail && fail('broken');
+        var variants = uakinoVariants(master, text);
+        success({ play: p, master: master, variants: variants });
+      }, function () { fail && fail('broken'); });
+    }, function () { fail && fail('play'); });
+  }
+  // The voice list of a series is what the service advertises, but a voice hosted on a dead file host cannot play.
+  // Try the requested one first, then the other voices for the same episode.
+  function uakinoResolveAny(movie, ref, success, fail) {
+    var tried = {}, queue = [ref.voice].concat(ref.alt || []).filter(function (v, i, a) { return a.indexOf(v) === i; });
+    if (!queue.length) queue = [undefined];
+    (function next() {
+      if (!queue.length) return fail && fail('broken');
+      var voice = queue.shift();
+      if (tried[voice]) return next();
+      tried[voice] = 1;
+      uakinoResolve(movie, { voice: voice, season: ref.season, episode: ref.episode }, function (r) {
+        r.voice = voice; r.switched = voice !== ref.voice;
+        success(r);
+      }, next);
+    })();
   }
   UkrSites.uakino = {
     search: function (params, success, fail) {
@@ -1130,7 +1174,8 @@
         success({ ok: true, type: 'series', title: '', voices: order.map(function (voice) {
           return { id: voice, display_name: voice, seasons: Object.keys(byVoice[voice]).map(Number).sort(function (a, b) { return a - b; }).map(function (sn) {
             return { title: 'Season ' + sn, season: sn, episodes: byVoice[voice][sn].sort(function (a, b) { return a.episode - b.episode; }).map(function (e) {
-              return { title: e.title || ('Серія ' + e.episode), number: e.episode, ref: { movie: movie, voice: voice, season: sn, episode: e.episode, source: 'uakino' } };
+              var alt = order.filter(function (v) { return v !== voice && byVoice[v][sn] && byVoice[v][sn].some(function (x) { return x.episode === e.episode; }); });
+              return { title: e.title || ('Серія ' + e.episode), number: e.episode, ref: { movie: movie, voice: voice, alt: alt, season: sn, episode: e.episode, source: 'uakino' } };
             }) };
           }) };
         }) });
@@ -1139,10 +1184,26 @@
     stream: function (ref, success, fail) {
       var movie = ref && (ref.movie || ref.id);
       if (!movie) return fail && fail('no_stream');
-      uakinoPlay(movie, { voice: ref.voice, season: ref.season, episode: ref.episode, q: ref.q }, function (p) {
-        var master = uakinoM3u8(p.manifest || p.manifest_abs);
-        success({ ok: true, streams: [{ url: master, quality: 'auto', hls_type: 'hlsjs' }], subtitles: uakinoSubs(p) });
-      }, fail);
+      uakinoResolveAny(movie, ref, function (r) {
+        var list = [];
+        // 720p first: starts fast on mobile networks; 1080p / 480p are in the quality menu
+        var pref = [720, 1080, 480], used = {};
+        pref.forEach(function (h) {
+          var v = r.variants.filter(function (x) { return x.h === h; })[0];
+          if (v) { used[h] = 1; list.push({ title: h + 'p', quality: h + 'p', url: v.url }); }
+        });
+        r.variants.forEach(function (v) { if (!used[v.h]) list.push({ title: (v.h || 'auto') + 'p', quality: (v.h || 'auto') + 'p', url: v.url }); });
+        if (!list.length) list.push({ title: 'auto', quality: 'auto', url: r.master });
+        var res = { ok: true, streams: list, subtitles: uakinoSubs(r.play) };
+        if (r.switched) {
+          res.message = 'Озвучка ' + (ref.voice || '') + ' недоступна, увімкнено ' + (r.voice || '');
+          try { if (Lampa.Noty && Lampa.Noty.show) Lampa.Noty.show(res.message); } catch (e) {}
+        }
+        success(res);
+      }, function () {
+        // text only, no error_code: codes like NO_STREAM would switch the whole source off for one broken episode
+        success({ ok: false, error: 'UAkino: ця серія зараз недоступна на сервері (спробуйте іншу озвучку чи серію)' });
+      });
     }
   };
   UKR_SITES.uakino = { name: 'UAkino', base: UAKINO_ORIGIN };
