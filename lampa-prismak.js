@@ -1156,6 +1156,12 @@
     }
     return out.sort(function (a, b) { return b.h - a.h || b.bw - a.bw; });
   }
+  function uakinoQualityLabel(height) {
+    if (height >= 2160) return '4K · 2160p';
+    if (height >= 1080) return 'FHD · 1080p';
+    if (height >= 720) return 'HD · 720p';
+    return 'SD · ' + (height || 'auto') + 'p';
+  }
   function uakinoPlay(movie, opt, success, fail) {
     uakinoApi('/hls/api/play', { movie: movie, s: uakinoSid(), hevc: uakinoHevc(), voice: opt.voice, season: opt.season, episode: opt.episode, q: opt.q }, function (p) {
       if (!p || !(p.manifest || p.manifest_abs)) return fail && fail('no_stream');
@@ -1238,15 +1244,30 @@
       var movie = ref && (ref.movie || ref.id);
       if (!movie) return fail && fail('no_stream');
       uakinoResolveAny(movie, ref, function (r) {
-        // Start with the signed master playlist. Lampa's HLS parser will load
-        // the variants itself, avoiding a second request for tokenized URLs.
-        var list = [{ title: 'auto', quality: 'auto', url: r.master, hls_type: 'hlsjs' }];
-        var res = { ok: true, streams: list, subtitles: uakinoSubs(r.play) };
-        if (r.switched) {
-          res.message = 'Озвучка ' + (ref.voice || '') + ' недоступна, увімкнено ' + (r.voice || '');
-          try { if (Lampa.Noty && Lampa.Noty.show) Lampa.Noty.show(res.message); } catch (e) {}
+        function finish(variants) {
+          var list = [];
+          var seen = {};
+          (variants || []).forEach(function (variant) {
+            if (!variant || !variant.url || seen[variant.h]) return;
+            seen[variant.h] = true;
+            var label = uakinoQualityLabel(variant.h);
+            list.push({ title: label, quality: label, url: variant.url, hls_type: 'hlsjs' });
+          });
+          // Highest available quality is first; Auto remains available as a
+          // fallback for devices that handle adaptive HLS better.
+          list.push({ title: 'Авто', quality: 'Авто', url: r.master, hls_type: 'hlsjs' });
+          var res = { ok: true, streams: list, subtitles: uakinoSubs(r.play) };
+          if (r.switched) {
+            res.message = 'Озвучка ' + (ref.voice || '') + ' недоступна, увімкнено ' + (r.voice || '');
+            try { if (Lampa.Noty && Lampa.Noty.show) Lampa.Noty.show(res.message); } catch (e) {}
+          }
+          success(res);
         }
-        success(res);
+        // The official UAkino plugin reads the master once, resolves its
+        // variants, and then starts the selected variant directly.
+        uakinoText(r.master, function (text) {
+          finish(String(text).indexOf('#EXTM3U') === 0 ? uakinoVariants(r.master, text) : []);
+        }, function () { finish([]); });
       }, function () {
         // text only, no error_code: codes like NO_STREAM would switch the whole source off for one broken episode
         success({ ok: false, error: 'UAkino: ця серія зараз недоступна на сервері (спробуйте іншу озвучку чи серію)' });
