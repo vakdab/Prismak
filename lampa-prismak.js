@@ -1096,6 +1096,12 @@
     }, null, { dataType: 'json' });
   }
   function uakinoM3u8(u) { return u && !/\.m3u8($|\?)/.test(u) ? (u.indexOf('?') > -1 ? u.replace('?', '.m3u8?') : u + '.m3u8') : u; }
+  function uakinoManifest(p) {
+    var manifest = p && p.manifest || '';
+    if (/^https?:\/\//i.test(manifest)) return manifest;
+    if (p && p.manifest_abs) return p.manifest_abs;
+    return manifest ? UAKINO_ORIGIN + (manifest.charAt(0) == '/' ? manifest : '/' + manifest) : '';
+  }
   function uakinoSubs(p) {
     return (p && p.subs || []).filter(function (s) { return s && s.url; }).map(function (s) { return { label: s.label || 'UA', url: s.url }; });
   }
@@ -1127,7 +1133,7 @@
   // tokenized playlist fail on some WebViews.
   function uakinoResolve(movie, opt, success, fail) {
     uakinoPlay(movie, opt, function (p) {
-      var master = uakinoM3u8(p.manifest_abs || p.manifest);
+      var master = uakinoM3u8(uakinoManifest(p));
       if (!master) return fail && fail('no_manifest');
       success({ play: p, master: master, variants: [] });
     }, function () { fail && fail('play'); });
