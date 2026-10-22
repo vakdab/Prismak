@@ -1115,6 +1115,13 @@
     } catch (e) {}
     return 0;
   }
+  function uakinoHlsType() {
+    try {
+      // Let Safari use its native HLS pipeline instead of forcing HLS.js.
+      if (Lampa.Platform && Lampa.Platform.is && Lampa.Platform.is('apple')) return 'native';
+    } catch (e) {}
+    return 'hlsjs';
+  }
   function uakinoApi(path, params, success, fail, direct) {
     var net = new Lampa.Reguest();
     net.silent((direct ? UAKINO_ORIGIN : UAKINO_PROXY) + path + '?' + uakinoQuery(params), function (json) {
@@ -1225,7 +1232,7 @@
         // the variants itself, avoiding a second request for tokenized URLs.
         var res = {
           ok: true,
-          streams: [{ title: 'Авто', quality: 'auto', url: r.master, hls_type: 'hlsjs' }],
+          streams: [{ title: 'Авто', quality: 'auto', url: r.master, hls_type: uakinoHlsType() }],
           subtitles: uakinoSubs(r.play)
         };
         if (r.switched) {
