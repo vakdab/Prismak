@@ -613,11 +613,16 @@
               var qualitys = prepared.qualitys;
               var play_url = first ? first.url : '';
               if (!first || !play_url) { component.pushError(Lampa.Lang.translate('online_nolink')); return; }
-              Lampa.Player.play({
+              var play_data = {
                 url: play_url, timeline: movie.timeline, quality: qualitys,
                 title: movie.player_title || movie.title, hls_type: first.hls_type || 'hlsjs',
                 subtitles: mergeSubtitles(first.subtitles, movie.subtitles)
-              });
+              };
+              if (sourceKey == 'uakino') {
+                var uakino_ref = movie.stream && movie.stream.ref || movie.stream_ref || {};
+                play_data.uakino = { movie: uakino_ref.movie || uakino_ref.id, voice: uakino_ref.voice };
+              }
+              Lampa.Player.play(play_data);
               Lampa.Player.playlist([]);
             }, function (errorText) { component.pushError(errorText || Lampa.Lang.translate('online_nolink')); });
           },
@@ -1110,17 +1115,11 @@
   function uakinoHevc() {
     try {
       if (Lampa.Platform && Lampa.Platform.is && Lampa.Platform.is('android')) return 1;
-      var t = 'video/mp4; codecs="hvc1.1.6.L120.90"';
+      var t = 'video/mp4; codecs="hvc1.1.6.L153.90"';
       if (window.MediaSource && MediaSource.isTypeSupported && MediaSource.isTypeSupported(t)) return 1;
+      if (document.createElement('video').canPlayType(t)) return 1;
     } catch (e) {}
     return 0;
-  }
-  function uakinoHlsType() {
-    try {
-      // Let Safari use its native HLS pipeline instead of forcing HLS.js.
-      if (Lampa.Platform && Lampa.Platform.is && Lampa.Platform.is('apple')) return 'native';
-    } catch (e) {}
-    return 'hlsjs';
   }
   function uakinoApi(path, params, success, fail, direct) {
     var net = new Lampa.Reguest();
@@ -1144,8 +1143,40 @@
     return manifest ? UAKINO_ORIGIN + (manifest.charAt(0) == '/' ? manifest : '/' + manifest) : '';
   }
   function uakinoSubs(p) {
-    return (p && p.subs || []).filter(function (s) { return s && s.url; }).map(function (s) { return { label: s.label || 'UA', url: s.url }; });
+    return (p && p.subs || []).filter(function (s) { return s && s.url; }).map(function (s) {
+      var url = s.url;
+      if (/^\/\//.test(url)) url = 'https:' + url;
+      else if (!/^https?:\/\//i.test(url)) url = UAKINO_ORIGIN + (url.charAt(0) == '/' ? '' : '/') + url;
+      return { label: s.label || 'UA', url: url };
+    });
   }
+  // Match UA Kino's player tuning: limit excessive HLS.js buffering only for
+  // UA Kino items, then restore the shared defaults after player setup.
+  (function uakinoLimitHlsBuffer() {
+    try {
+      if (!Lampa.Player || Lampa.Player.__uakBuf || typeof Lampa.Player.play != 'function') return;
+      Lampa.Player.__uakBuf = true;
+      var originalPlay = Lampa.Player.play;
+      Lampa.Player.play = function (item) {
+        try {
+          if (item && item.uakino && window.Hls && window.Hls.DefaultConfig) {
+            var c = window.Hls.DefaultConfig;
+            var old = { back: c.backBufferLength, max: c.maxBufferLength, cap: c.maxMaxBufferLength,
+              size: c.maxBufferSize, abr: c.abrBandWidthFactor, up: c.abrBandWidthUpFactor, timeout: c.fragLoadingTimeOut };
+            c.backBufferLength = 30; c.maxBufferLength = 60; c.maxMaxBufferLength = 120;
+            c.maxBufferSize = 120 * 1000 * 1000; c.abrBandWidthFactor = 0.8;
+            c.abrBandWidthUpFactor = 0.5; c.fragLoadingTimeOut = 30000;
+            setTimeout(function () {
+              c.backBufferLength = old.back; c.maxBufferLength = old.max; c.maxMaxBufferLength = old.cap;
+              c.maxBufferSize = old.size; c.abrBandWidthFactor = old.abr;
+              c.abrBandWidthUpFactor = old.up; c.fragLoadingTimeOut = old.timeout;
+            }, 20000);
+          }
+        } catch (e) {}
+        return originalPlay.apply(this, arguments);
+      };
+    } catch (e) {}
+  })();
   function uakinoPlay(movie, opt, success, fail) {
     uakinoApi('/hls/api/play', { movie: movie, s: uakinoSid(), hevc: uakinoHevc(), voice: opt.voice, season: opt.season, episode: opt.episode, q: opt.q }, function (p) {
       if (!p || !(p.manifest || p.manifest_abs)) return fail && fail('no_stream');
@@ -1232,7 +1263,7 @@
         // the variants itself, avoiding a second request for tokenized URLs.
         var res = {
           ok: true,
-          streams: [{ title: 'Авто', quality: 'auto', url: r.master, hls_type: uakinoHlsType() }],
+          streams: [{ title: 'Авто', quality: 'auto', url: r.master, hls_type: 'hlsjs' }],
           subtitles: uakinoSubs(r.play)
         };
         if (r.switched) {
