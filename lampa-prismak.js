@@ -1139,29 +1139,6 @@
   function uakinoSubs(p) {
     return (p && p.subs || []).filter(function (s) { return s && s.url; }).map(function (s) { return { label: s.label || 'UA', url: s.url }; });
   }
-  function uakinoText(url, success, fail) {
-    var net = new Lampa.Reguest();
-    net.silent(url, function (t) { success(typeof t == 'string' ? t : (t && t.responseText) || ''); },
-      function (e) { fail && fail(e && e.status || 0); }, null, { dataType: 'text' });
-  }
-  // master playlist -> [{ h: 1080, url: absolute variant url }] (best first). Variant URLs are relative to the CDN host.
-  function uakinoVariants(masterUrl, text) {
-    var lines = String(text || '').split(/\r?\n/), out = [], base;
-    try { base = new URL(masterUrl); } catch (e) { return out; }
-    for (var i = 0; i < lines.length; i++) {
-      if (lines[i].indexOf('#EXT-X-STREAM-INF') !== 0 || !lines[i + 1]) continue;
-      var res = /RESOLUTION=\d+x(\d+)/.exec(lines[i]), bw = /BANDWIDTH=(\d+)/.exec(lines[i]);
-      var abs; try { abs = new URL(lines[i + 1].trim(), base).href; } catch (e) { continue; }
-      out.push({ h: res ? parseInt(res[1], 10) : 0, bw: bw ? parseInt(bw[1], 10) : 0, url: abs });
-    }
-    return out.sort(function (a, b) { return b.h - a.h || b.bw - a.bw; });
-  }
-  function uakinoQualityLabel(height) {
-    if (height >= 2160) return '4K · 2160p';
-    if (height >= 1080) return 'FHD · 1080p';
-    if (height >= 720) return 'HD · 720p';
-    return 'SD · ' + (height || 'auto') + 'p';
-  }
   function uakinoPlay(movie, opt, success, fail) {
     uakinoApi('/hls/api/play', { movie: movie, s: uakinoSid(), hevc: uakinoHevc(), voice: opt.voice, season: opt.season, episode: opt.episode, q: opt.q }, function (p) {
       if (!p || !(p.manifest || p.manifest_abs)) return fail && fail('no_stream');
@@ -1244,30 +1221,18 @@
       var movie = ref && (ref.movie || ref.id);
       if (!movie) return fail && fail('no_stream');
       uakinoResolveAny(movie, ref, function (r) {
-        function finish(variants) {
-          var list = [];
-          var seen = {};
-          (variants || []).forEach(function (variant) {
-            if (!variant || !variant.url || seen[variant.h]) return;
-            seen[variant.h] = true;
-            var label = uakinoQualityLabel(variant.h);
-            list.push({ title: label, quality: label, url: variant.url, hls_type: 'hlsjs' });
-          });
-          // Highest available quality is first; Auto remains available as a
-          // fallback for devices that handle adaptive HLS better.
-          list.push({ title: 'Авто', quality: 'Авто', url: r.master, hls_type: 'hlsjs' });
-          var res = { ok: true, streams: list, subtitles: uakinoSubs(r.play) };
-          if (r.switched) {
-            res.message = 'Озвучка ' + (ref.voice || '') + ' недоступна, увімкнено ' + (r.voice || '');
-            try { if (Lampa.Noty && Lampa.Noty.show) Lampa.Noty.show(res.message); } catch (e) {}
-          }
-          success(res);
+        // Start with the signed master playlist. Lampa's HLS parser will load
+        // the variants itself, avoiding a second request for tokenized URLs.
+        var res = {
+          ok: true,
+          streams: [{ title: 'Авто', quality: 'auto', url: r.master, hls_type: 'hlsjs' }],
+          subtitles: uakinoSubs(r.play)
+        };
+        if (r.switched) {
+          res.message = 'Озвучка ' + (ref.voice || '') + ' недоступна, увімкнено ' + (r.voice || '');
+          try { if (Lampa.Noty && Lampa.Noty.show) Lampa.Noty.show(res.message); } catch (e) {}
         }
-        // The official UAkino plugin reads the master once, resolves its
-        // variants, and then starts the selected variant directly.
-        uakinoText(r.master, function (text) {
-          finish(String(text).indexOf('#EXTM3U') === 0 ? uakinoVariants(r.master, text) : []);
-        }, function () { finish([]); });
+        success(res);
       }, function () {
         // text only, no error_code: codes like NO_STREAM would switch the whole source off for one broken episode
         success({ ok: false, error: 'UAkino: ця серія зараз недоступна на сервері (спробуйте іншу озвучку чи серію)' });
