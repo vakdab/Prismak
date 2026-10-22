@@ -525,7 +525,19 @@
                   hls_type: first.hls_type || 'hlsjs',
                   isonline: true
                 });
-                Lampa.Player.playlist(playlist);
+                // Do not give Lampa unresolved URL functions. The official
+                // UAkino plugin starts with the current item and appends only
+                // already-resolved episodes later; some Lampa builds try to
+                // parse every playlist URL immediately.
+                var readyPlaylist = playlist.filter(function (cell) {
+                  return cell && typeof cell.url == 'string' && cell.url;
+                });
+                Lampa.Player.playlist(readyPlaylist.length ? readyPlaylist : [{
+                  title: item.title, url: play_url, timeline: item.timeline,
+                  subtitles: mergeSubtitles(first.subtitles, item.subtitles),
+                  season: item.season, episode: item.episode,
+                  voice_name: item.voice_name, hls_type: first.hls_type || 'hlsjs'
+                }]);
               }
               if (isExternalPlayer) {
                 var toPrefetch = playlist.filter(function (c) { return c._prefetch; });
