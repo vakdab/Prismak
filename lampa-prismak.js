@@ -863,7 +863,7 @@
   }
   function ukrBlocked(html) {
     html = String(html || '');
-    return !html || html.length < 400 || /Attention Required!|Just a moment\.\.\.|cf-mitigated|Sorry, you have been blocked/i.test(html.slice(0, 6000));
+    return !html || html.length < 80 || /Attention Required!|Just a moment\.\.\.|cf-mitigated|Sorry, you have been blocked/i.test(html.slice(0, 6000));
   }
   function ukrBody(response) {
     if (typeof response == 'string') return response;
@@ -985,14 +985,23 @@
           var doc = ukrDoc(html);
           if (!doc) return fail && fail('parse');
           var title = ukrText(doc.querySelector('div.full_header-title h1')) || ukrText(doc.querySelector('h1'));
-          var frame = doc.querySelector('.tabs_b.visible iframe') || doc.querySelector('.tabs_b iframe');
+          var frame = doc.querySelector('.tabs_b.visible iframe') || doc.querySelector('.tabs_b iframe') || doc.querySelector('iframe[src], iframe[data-src]');
           var playerUrl = frame && ukrAbs('eneyida', frame.getAttribute('src') || frame.getAttribute('data-src'));
+          // Eneyida has changed its player markup more than once. Some pages store the player in data-url/data-embed.
+          if (!playerUrl && doc) {
+            var holder = doc.querySelector('[data-url], [data-embed], [data-player]');
+            playerUrl = holder && ukrAbs('eneyida', holder.getAttribute('data-url') || holder.getAttribute('data-embed') || holder.getAttribute('data-player'));
+          }
           if (!playerUrl) return fail && fail('no_player');
           ukrRequest('eneyida', playerUrl, { referer: url }, function (phtml) {
             var pdoc = ukrDoc(phtml), script = '';
             if (pdoc) Array.prototype.forEach.call(pdoc.querySelectorAll('script'), function (s) { script += s.textContent + '\n'; });
             if (!script) script = phtml;
             var raw = ukrFileValue(script), parsed = null;
+            if (!raw) {
+              var fm = /(?:file|src)\s*[:=]\s*[\"']([^\"']+(?:m3u8|mp4|vod)[^\"']*)/i.exec(script) || /[\"']file[\"']\s*:\s*[\"']([^\"']+)[\"']/i.exec(script);
+              raw = fm ? fm[1].replace(/\\\"/g, '\"') : '';
+            }
             try { parsed = JSON.parse(raw); } catch (e) {}
             if (!parsed) {
               if (/^https?:\/\//i.test(raw)) return success({ ok: true, type: 'movie', title: title, streams: [{ title: 'Eneyida', quality: 'auto', url: raw }] });
@@ -1126,7 +1135,11 @@
   }
   // The voice list of a series is what the service advertises, but a voice hosted on a dead file host cannot play.
   // Try the requested one first, then the other voices for the same episode.
+  var uakino_resolve_cache = {};
   function uakinoResolveAny(movie, ref, success, fail) {
+    var cacheKey = [movie, ref.voice || '', ref.season || '', ref.episode || ''].join(':');
+    var cached = uakino_resolve_cache[cacheKey];
+    if (cached && Date.now() - cached.time < 30000) return success(cached.value);
     var tried = {}, queue = [ref.voice].concat(ref.alt || []).filter(function (v, i, a) { return a.indexOf(v) === i; });
     if (!queue.length) queue = [undefined];
     (function next() {
@@ -1136,6 +1149,7 @@
       tried[voice] = 1;
       uakinoResolve(movie, { voice: voice, season: ref.season, episode: ref.episode }, function (r) {
         r.voice = voice; r.switched = voice !== ref.voice;
+        uakino_resolve_cache[cacheKey] = { time: Date.now(), value: r };
         success(r);
       }, next);
     })();
