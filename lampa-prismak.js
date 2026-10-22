@@ -1204,10 +1204,10 @@
         var pref = [720, 1080, 480], used = {};
         pref.forEach(function (h) {
           var v = r.variants.filter(function (x) { return x.h === h; })[0];
-          if (v) { used[h] = 1; list.push({ title: h + 'p', quality: h + 'p', url: v.url }); }
+          if (v) { used[h] = 1; list.push({ title: h + 'p', quality: h + 'p', url: v.url, hls_type: 'hlsjs' }); }
         });
-        r.variants.forEach(function (v) { if (!used[v.h]) list.push({ title: (v.h || 'auto') + 'p', quality: (v.h || 'auto') + 'p', url: v.url }); });
-        if (!list.length) list.push({ title: 'auto', quality: 'auto', url: r.master });
+        r.variants.forEach(function (v) { if (!used[v.h]) list.push({ title: (v.h || 'auto') + 'p', quality: (v.h || 'auto') + 'p', url: v.url, hls_type: 'hlsjs' }); });
+        if (!list.length) list.push({ title: 'auto', quality: 'auto', url: r.master, hls_type: 'hlsjs' });
         var res = { ok: true, streams: list, subtitles: uakinoSubs(r.play) };
         if (r.switched) {
           res.message = 'Озвучка ' + (ref.voice || '') + ' недоступна, увімкнено ' + (r.voice || '');
