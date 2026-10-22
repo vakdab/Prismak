@@ -1127,10 +1127,21 @@
     uakinoPlay(movie, opt, function (p) {
       var master = uakinoM3u8(p.manifest || p.manifest_abs);
       uakinoText(master, function (text) {
+        // The signed manifest is already a valid player URL. On some WebViews
+        // a direct preflight is blocked by CORS even though playback is allowed.
+        // Only reject an explicit non-playlist response; keep the master URL as
+        // a fallback when the response is opaque/empty.
+        if (!String(text).trim()) return success({ play: p, master: master, variants: [] });
         if (String(text).indexOf('#EXTM3U') !== 0) return fail && fail('broken');
         var variants = uakinoVariants(master, text);
         success({ play: p, master: master, variants: variants });
-      }, function () { fail && fail('broken'); });
+      }, function (status) {
+        // status=0 is normally a WebView CORS/network visibility error. Do not
+        // discard a freshly signed manifest in that case; the player can fetch
+        // it directly. HTTP errors still trigger the alternate-voice fallback.
+        if (!status) return success({ play: p, master: master, variants: [] });
+        fail && fail('broken');
+      });
     }, function () { fail && fail('play'); });
   }
   // The voice list of a series is what the service advertises, but a voice hosted on a dead file host cannot play.
