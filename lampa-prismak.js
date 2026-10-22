@@ -1045,6 +1045,108 @@
     }
   };
 
+  /* ====================================================================
+     UAkino (uakino.ax): own catalogue API + signed HLS.
+     - catalogue lookup (find) goes through the Prismak Worker (/uakino/*)
+     - play + playlists + segments go DIRECT from the device: uakino.ax signs
+       the HLS tokens to the caller's IP, and a Cloudflare Worker egresses from
+       a changing IP, so tokens issued to the Worker are rejected (403) ~70% of
+       the time (measured 12/12 ok direct vs ~4/14 via Worker).
+     ==================================================================== */
+  var UAKINO_PROXY = 'https://prismak-plugin.animegran8.workers.dev/uakino';
+  var UAKINO_ORIGIN = 'https://uakino.ax';
+  function uakinoSid() {
+    var s = Lampa.Storage.get('uakino_sid', '');
+    if (!s) { s = 'lp' + Math.random().toString(36).slice(2) + Date.now().toString(36); Lampa.Storage.set('uakino_sid', s); }
+    return s;
+  }
+  function uakinoQuery(o) {
+    return Object.keys(o).filter(function (k) { return o[k] !== undefined && o[k] !== null && o[k] !== ''; })
+      .map(function (k) { return k + '=' + encodeURIComponent(o[k]); }).join('&');
+  }
+  function uakinoHevc() {
+    try {
+      if (Lampa.Platform && Lampa.Platform.is && Lampa.Platform.is('android')) return 1;
+      var t = 'video/mp4; codecs="hvc1.1.6.L120.90"';
+      if (window.MediaSource && MediaSource.isTypeSupported && MediaSource.isTypeSupported(t)) return 1;
+    } catch (e) {}
+    return 0;
+  }
+  function uakinoApi(path, params, success, fail, direct) {
+    var net = new Lampa.Reguest();
+    net.silent((direct ? UAKINO_ORIGIN : UAKINO_PROXY) + path + '?' + uakinoQuery(params), function (json) {
+      if (typeof json == 'string') { try { json = JSON.parse(json); } catch (e) { return fail && fail('parse'); } }
+      success(json);
+    }, function (err) {
+      // uakino.ax answers an unknown title with HTTP 404 + {"found":false}: that is "nothing found", not a network error
+      var body = err && (err.responseJSON || err.responseText);
+      if (typeof body == 'string') { try { body = JSON.parse(body); } catch (e) { body = null; } }
+      if (body && body.found === false) return success(body);
+      if (err && err.status == 404 && /lampa\/find/.test(path)) return success({ found: false });
+      fail && fail('network');
+    }, null, { dataType: 'json' });
+  }
+  function uakinoM3u8(u) { return u && !/\.m3u8($|\?)/.test(u) ? (u.indexOf('?') > -1 ? u.replace('?', '.m3u8?') : u + '.m3u8') : u; }
+  function uakinoSubs(p) {
+    return (p && p.subs || []).filter(function (s) { return s && s.url; }).map(function (s) { return { label: s.label || 'UA', url: s.url }; });
+  }
+  function uakinoPlay(movie, opt, success, fail) {
+    uakinoApi('/hls/api/play', { movie: movie, s: uakinoSid(), hevc: uakinoHevc(), voice: opt.voice, season: opt.season, episode: opt.episode, q: opt.q }, function (p) {
+      if (!p || !(p.manifest || p.manifest_abs)) return fail && fail('no_stream');
+      success(p);
+    }, fail, true);
+  }
+  UkrSites.uakino = {
+    search: function (params, success, fail) {
+      // params as built by the component: title, original_title, year, imdb_id, tmdb_id, serial
+      uakinoApi('/hls/api/lampa/find', {
+        tmdb: params.tmdb_id || params.tmdb, imdb: params.imdb_id, type: params.serial ? 'tv' : 'movie',
+        year: params.year, title: params.title, orig: params.original_title
+      }, function (j) {
+        if (!j || !j.found || !j.movie_id) return success({ ok: true, items: [] });
+        success({ ok: true, items: [{ title: j.title || params.title || '', title_en: j.origin_name || '', year: j.year, poster: '', ref: { movie: j.movie_id, series: !!j.is_series, source: 'uakino' } }] });
+      }, fail);
+    },
+    content: function (ref, success, fail) {
+      var movie = ref && (ref.movie || ref.id);
+      if (!movie) return fail && fail('no_player');
+      uakinoPlay(movie, {}, function (p) {
+        var episodes = Array.isArray(p.episodes) ? p.episodes : [];
+        var series = !!p.is_series && episodes.some(function (e) { return e && e.season != null; });
+        if (!series) {
+          var voices = (p.voices && p.voices.length) ? p.voices : ['UAkino'];
+          return success({ ok: true, type: 'movie', title: '', streams: voices.map(function (voice) {
+            return { title: voice, quality: 'auto', ref: { movie: movie, voice: voice, source: 'uakino' } };
+          }) });
+        }
+        var byVoice = {}, order = [];
+        episodes.forEach(function (e) {
+          if (!e || e.season == null || e.episode == null) return;
+          var v = e.voice || 'UAkino';
+          if (!byVoice[v]) { byVoice[v] = {}; order.push(v); }
+          (byVoice[v][e.season] = byVoice[v][e.season] || []).push(e);
+        });
+        if (!order.length) return fail && fail('no_stream');
+        success({ ok: true, type: 'series', title: '', voices: order.map(function (voice) {
+          return { id: voice, display_name: voice, seasons: Object.keys(byVoice[voice]).map(Number).sort(function (a, b) { return a - b; }).map(function (sn) {
+            return { title: 'Season ' + sn, season: sn, episodes: byVoice[voice][sn].sort(function (a, b) { return a.episode - b.episode; }).map(function (e) {
+              return { title: e.title || ('Серія ' + e.episode), number: e.episode, ref: { movie: movie, voice: voice, season: sn, episode: e.episode, source: 'uakino' } };
+            }) };
+          }) };
+        }) });
+      }, fail);
+    },
+    stream: function (ref, success, fail) {
+      var movie = ref && (ref.movie || ref.id);
+      if (!movie) return fail && fail('no_stream');
+      uakinoPlay(movie, { voice: ref.voice, season: ref.season, episode: ref.episode, q: ref.q }, function (p) {
+        var master = uakinoM3u8(p.manifest || p.manifest_abs);
+        success({ ok: true, streams: [{ url: master, quality: 'auto', hls_type: 'hlsjs' }], subtitles: uakinoSubs(p) });
+      }, fail);
+    }
+  };
+  UKR_SITES.uakino = { name: 'UAkino', base: UAKINO_ORIGIN };
+
 
   var config = {
     api_base: 'https://bbe.lme.isroot.in/api/v2',
