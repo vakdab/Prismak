@@ -485,6 +485,25 @@
             getStream(item.ref, function (streams) {
               var prepared = prepareStreams(streams);
               var first = prepared.first;
+              if (sourceKey == 'uakino' && first && first.url) {
+                var uakino_ref = item.ref || {};
+                var uakino_item = {
+                  title: item.title,
+                  url: first.url,
+                  timeline: item.timeline,
+                  hls_type: first.hls_type || 'hlsjs',
+                  uakino: {
+                    movie: uakino_ref.movie,
+                    voice: uakino_ref.voice,
+                    season: uakino_ref.season,
+                    episode: uakino_ref.episode
+                  },
+                  subtitles: mergeSubtitles(first.subtitles, item.subtitles)
+                };
+                Lampa.Player.play(uakino_item);
+                Lampa.Player.playlist([uakino_item]);
+                return;
+              }
               var qualitys = prepared.qualitys;
               var play_url = first ? first.url : '';
               if (!first || !play_url) { component.pushError(Lampa.Lang.translate('online_nolink')); return; }
