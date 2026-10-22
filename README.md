@@ -14,7 +14,7 @@ https://cdn.jsdelivr.net/gh/vakdab/Prismak@main/lampa-prismak.js
 
 <!-- prismak-pinned-cdn -->
 ```text
-https://cdn.jsdelivr.net/gh/vakdab/Prismak@35d1bf56270493e254546a3375cfbb23a4b8654c/lampa-prismak.js
+https://cdn.jsdelivr.net/gh/vakdab/Prismak@8ca9ed2f52f8f9c952081bae74c9df2b5d1f28d7/lampa-prismak.js
 ```
 
 Після кожного оновлення `main` GitHub Actions автоматично оновлює це посилання на SHA відповідного коміту.
