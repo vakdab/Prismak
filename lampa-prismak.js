@@ -519,12 +519,13 @@
               });
               function startPlayback() {
                 Lampa.Player.play({
-                  url: play_url, timeline: item.timeline, quality: qualitys,
+                  url: play_url, timeline: item.timeline,
                   title: item.title, subtitles: mergeSubtitles(first.subtitles, item.subtitles),
                   season: item.season, episode: item.episode, voice_name: item.voice_name,
                   hls_type: first.hls_type || 'hlsjs',
-                  playlist: playlist, isonline: true
+                  isonline: true
                 });
+                Lampa.Player.playlist(playlist);
               }
               if (isExternalPlayer) {
                 var toPrefetch = playlist.filter(function (c) { return c._prefetch; });
