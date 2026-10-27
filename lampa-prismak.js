@@ -1281,16 +1281,22 @@
 
 
   /* New providers: Lampac-compatible VOD adapters. */
-  var LAMPAC_BASE = ''; // Set to an HTTPS self-hosted Lampac/Prismak backend, without a trailing slash.
-  var PROVIDER_BASES = {
-    videohub: LAMPAC_BASE ? LAMPAC_BASE + '/lite/videohub' : '',
-    veoveo: LAMPAC_BASE ? LAMPAC_BASE + '/lite/veoveo' : '',
-    hdvb: LAMPAC_BASE ? LAMPAC_BASE + '/lite/hdvb' : '',
-    vibix: LAMPAC_BASE ? LAMPAC_BASE + '/lite/vibix' : ''
-  };
+  var LAMPAC_BASE = Lampa.Storage.get('onlineua_lampac_base', '');
   var NEW_SOURCE_TITLES = {
     videohub: 'VideoHUB', veoveo: 'VeoVeo', hdvb: 'HDVB', vibix: 'Vibix'
   };
+  function getLampacBase() {
+    var base = Lampa.Storage.get('onlineua_lampac_base', LAMPAC_BASE || '');
+    base = String(base || '').trim().replace(/\/+$/, '');
+    return /^https:\/\//i.test(base) ? base : '';
+  }
+  function getProviderBase(source) {
+    var base = getLampacBase();
+    return base ? base + '/lite/' + source : '';
+  }
+  function isConfiguredLampacSource(source) {
+    return !NewSites[source] || !!getLampacBase();
+  }
 
   function sourceError(name, detail) {
     return { ok: false, error: name + ': ' + (detail || 'джерело не відповідає') };
@@ -1314,7 +1320,7 @@
     return out;
   }
   function providerRequest(source, action, payload, success, fail) {
-    var base = PROVIDER_BASES[source];
+    var base = getProviderBase(source);
     if (!base) return success(sourceError(NEW_SOURCE_TITLES[source], 'не налаштовано LAMPAC_BASE'));
     var params = providerRefParams(payload);
     params.action = action;
@@ -1424,7 +1430,7 @@
         this.getJson(this.apiBase() + '/sources', function (json) {
           if (json && Array.isArray(json.sources)) {
             json.sources = json.sources.filter(function (item) { return item && item.key != 'uaserials' && !UkrSites[item.key] && !NewSites[item.key]; });
-            Object.keys(UkrSites).forEach(function (key) {
+            Object.keys(UkrSites).filter(isConfiguredLampacSource).forEach(function (key) {
               json.sources.push({ key: key, name: (UKR_SITES[key] && UKR_SITES[key].name) || NEW_SOURCE_TITLES[key] || key, enabled: true, capabilities: { search: true, content: true, stream: true } });
             });
           }
@@ -1436,7 +1442,8 @@
       value: function search(params, sources, success, fail) {
         var url = this.apiBase() + '/search';
         var sourceKey = Array.isArray(sources) ? sources.join(',') : sources;
-        if (NewSites[sourceKey]) return NewSites[sourceKey].search(params, success, fail);
+        // NewSites is merged into UkrSites below, so all local sources must be routed here first.
+        if (UkrSites[sourceKey]) return UkrSites[sourceKey].search(params, success, fail);
         url = this.addParam(url, 'sources', sourceKey);
         url = this.addParam(url, 'source', sourceKey);
         for (var key in params) url = this.addParam(url, key, params[key]);
@@ -1445,7 +1452,7 @@
     }, {
       key: "getContent",
       value: function getContent(sourceKey, ref, success, fail) {
-        if (NewSites[sourceKey]) return NewSites[sourceKey].content(ref, success, fail);
+        if (UkrSites[sourceKey]) return UkrSites[sourceKey].content(ref, success, fail);
         var url = this.apiBase() + '/content';
         var data = { source: sourceKey, ref: ref, full: true };
         this.postJson(url, data, success, fail);
@@ -1453,7 +1460,7 @@
     }, {
       key: "getStream",
       value: function getStream(sourceKey, ref, success, fail) {
-        if (NewSites[sourceKey]) return NewSites[sourceKey].stream(ref, success, fail);
+        if (UkrSites[sourceKey]) return UkrSites[sourceKey].stream(ref, success, fail);
         var url = this.apiBase() + '/stream';
         var data = { source: sourceKey, ref: ref };
         this.postJson(url, data, success, fail);
@@ -1674,7 +1681,7 @@
           var k = item && sourcesStore.normalizeName(item.key || item.name);
           return k && k != 'uaserials' && !UkrSites[k] && !NewSites[k];
         });
-        Object.keys(UkrSites).forEach(function (key) {
+        Object.keys(UkrSites).filter(isConfiguredLampacSource).forEach(function (key) {
           list.push({ key: key, name: (UKR_SITES[key] && UKR_SITES[key].name) || NEW_SOURCE_TITLES[key] || key, enabled: true, capabilities: { search: true, content: true, stream: true } });
         });
       }
@@ -2266,7 +2273,7 @@
     };
   }
 
-  var PLUGIN_STORAGE_KEYS = ['ONLINEUA_SOURCES_SORT', 'ONLINEUA_SOURCES_HIDE', 'onlineua_last_balanser', 'onlineua_balanser', 'onlineua_watched_last', 'onlineua_view'];
+  var PLUGIN_STORAGE_KEYS = ['ONLINEUA_SOURCES_SORT', 'ONLINEUA_SOURCES_HIDE', 'onlineua_last_balanser', 'onlineua_balanser', 'onlineua_watched_last', 'onlineua_view', 'onlineua_lampac_base'];
 
   function isVisibleSource(key) {
     if (!key) return false;
@@ -2387,6 +2394,11 @@
       field: { name: Lampa.Lang.translate('onlineua_settings_sources') },
       onChange: function onChange() { openSourcesModal(); }
     });
+    SettingsApi.addParam({
+      component: 'onlineua',
+      param: { name: 'onlineua_lampac_base', type: 'input', default: '' },
+      field: { name: Lampa.Lang.translate('onlineua_settings_lampac') }
+    });
   }
 
   // Видаляємо плагін CommunityWatches, якщо він залишився з попередніх версій
@@ -2464,6 +2476,7 @@
       online_balanser_timeout: { ru: 'Балансер будет переключен автоматически через <span class="timeout">10</span> секунд.', uk: 'Балансер буде переключено автоматично через <span class="timeout">10</span> секунд.', en: 'Balancer will be switched automatically in <span class="timeout">10</span> seconds.', zh: '平衡器将在<span class="timeout">10</span>秒内自动切换。' },
       onlineua_settings_title: { ru: 'OnlineUA', uk: 'OnlineUA', en: 'OnlineUA' },
       onlineua_settings_sources: { ru: 'Джерела', uk: 'Джерела', en: 'Sources' },
+      onlineua_settings_lampac: { ru: 'Адреса Lampac', uk: 'Адреса Lampac', en: 'Lampac address' },
       onlineua_search_all: { ru: 'Поиск по всем источникам', uk: 'Пошук по всіх джерелах', en: 'Search all sources' },
       onlineua_sources_empty: { ru: 'Список джерел ще не синхронізований.', uk: 'Список джерел ще не синхронізований.', en: 'Sources list has not been synced yet.' },
       onlineua_sources_enabled: { ru: 'Увімкнено', uk: 'Увімкнено', en: 'Enabled' },

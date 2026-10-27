@@ -23,6 +23,6 @@ https://cdn.jsdelivr.net/gh/vakdab/Prismak@749e0250ac4a2d2e0856b25a1a22361d4ab5f
 
 ## Додані джерела
 
-Плагін підтримує VideoHUB, VeoVeo, HDVB і Vibix через Lampac-сумісний backend. У `lampa-prismak.js` задайте HTTPS-адресу self-hosted Lampac без завершального `/` у `LAMPAC_BASE`; очікуються маршрути `/lite/videohub`, `/lite/veoveo`, `/lite/hdvb` і `/lite/vibix`. Backend має повертати JSON для `action=search|content|stream`; токени та upstream-секрети повинні залишатися на backend/Worker.
+Плагін підтримує VideoHUB, VeoVeo, HDVB і Vibix через Lampac-сумісний backend. Адресу потрібно задати в **OnlineUA → Адреса Lampac** у storage-ключі `onlineua_lampac_base`, наприклад `https://lampac.example.com`, без завершального `/`. Після збереження очікуються маршрути `/lite/videohub`, `/lite/veoveo`, `/lite/hdvb` і `/lite/vibix`. Без валідної HTTPS-адреси ці чотири джерела не показуються. Backend має повертати JSON для `action=search|content|stream`; токени та upstream-секрети повинні залишатися на backend/Worker.
 
 Якщо Lampac не налаштований або upstream недоступний, джерело повертає зрозумілу помилку для поточного запиту і не вимикає всі джерела.
