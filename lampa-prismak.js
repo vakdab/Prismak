@@ -1280,7 +1280,7 @@
   UKR_SITES.uakino = { name: 'UAkino', base: UAKINO_ORIGIN };
 
 
-  /* New providers: Lampac-compatible VOD adapters + WTCH HTML adapter. */
+  /* New providers: Lampac-compatible VOD adapters. */
   var LAMPAC_BASE = ''; // Set to an HTTPS self-hosted Lampac/Prismak backend, without a trailing slash.
   var PROVIDER_BASES = {
     videohub: LAMPAC_BASE ? LAMPAC_BASE + '/lite/videohub' : '',
@@ -1289,7 +1289,7 @@
     vibix: LAMPAC_BASE ? LAMPAC_BASE + '/lite/vibix' : ''
   };
   var NEW_SOURCE_TITLES = {
-    videohub: 'VideoHUB', veoveo: 'VeoVeo', hdvb: 'HDVB', vibix: 'Vibix', wtch: 'WTCH'
+    videohub: 'VideoHUB', veoveo: 'VeoVeo', hdvb: 'HDVB', vibix: 'Vibix'
   };
 
   function sourceError(name, detail) {
@@ -1371,29 +1371,10 @@
     };
   }
 
-  function wtchRequest(url, success, fail) { ukrRequest('wtch', url, { referer: 'https://wtch.ch/' }, success, fail); }
-  function wtchPlayerUrls(html, pageUrl) {
-    var found = [], text = String(html || ''), m;
-    var re = /(?:file|source|src|url|data-file)\s*[:=]\s*["']([^"']+\.(?:m3u8|mp4)(?:\?[^"']*)?)/ig;
-    while ((m = re.exec(text))) found.push(ukrAbs('wtch', m[1]));
-    var direct = text.match(/https?:\/\/[^\s"'<>]+\.(?:m3u8|mp4)(?:\?[^\s"'<>]*)?/ig) || [];
-    found = found.concat(direct.map(function (u) { return u.replace(/&amp;/g, '&'); }));
-    var doc = ukrDoc(text); if (doc) Array.prototype.forEach.call(doc.querySelectorAll('iframe[src], iframe[data-src], [data-file]'), function (node) { var u = node.getAttribute('data-file') || node.getAttribute('src') || node.getAttribute('data-src'); if (u && /\.(?:m3u8|mp4)/i.test(u)) found.push(ukrAbs('wtch', u)); });
-    return found.filter(function (u, i, a) { return u && a.indexOf(u) === i; });
-  }
   var NewSites = {
-    videohub: lampacSource('videohub'), veoveo: lampacSource('veoveo'), hdvb: lampacSource('hdvb'), vibix: lampacSource('vibix'),
-    wtch: {
-      search: function (params, success, fail) {
-        var q = params.title || params.original_title || ''; var url = 'https://wtch.ch/m/?s=' + encodeURIComponent(q);
-        wtchRequest(url, function (html) { var doc = ukrDoc(html), items = [], seen = {}; if (doc) Array.prototype.forEach.call(doc.querySelectorAll('a[href]'), function (a) { var href = a.getAttribute('href'), title = ukrText(a); if (!href || !title || title.length < 2 || seen[href] || !/wtch\.ch/i.test(ukrAbs('wtch', href))) return; if (!/(film|movie|serial|сері|season|сезон|watch|див)/i.test((a.className || '') + ' ' + title + ' ' + href)) return; seen[href] = 1; var img = a.querySelector('img') || (a.parentNode && a.parentNode.querySelector && a.parentNode.querySelector('img')); items.push({ title: title, poster: img && ukrAbs('wtch', img.getAttribute('data-src') || img.getAttribute('src')), ref: { url: ukrAbs('wtch', href), source: 'wtch' } }); }); success({ ok: true, items: items.slice(0, 20) }); }, function (why) { success(sourceError('WTCH', why)); });
-      },
-      content: function (ref, success, fail) { var url = ukrAbs('wtch', ref && ref.url); if (!url) return success(sourceError('WTCH', 'сторінка не знайдена')); wtchRequest(url, function (html) { var doc = ukrDoc(html), title = ukrText(doc && (doc.querySelector('h1') || doc.querySelector('title'))) || ''; var urls = wtchPlayerUrls(html, url); if (urls.length) return success({ ok: true, type: 'movie', title: title, streams: urls.map(function (u) { return { title: 'WTCH', quality: 'auto', url: u, hls_type: /\.m3u8/i.test(u) ? 'hlsjs' : undefined }; }) }); var frame = doc && doc.querySelector('iframe[src], iframe[data-src]'); if (frame) return success({ ok: true, type: 'movie', title: title, streams: [{ title: 'WTCH player', quality: 'auto', ref: { url: ukrAbs('wtch', frame.getAttribute('src') || frame.getAttribute('data-src')), source: 'wtch', player: true } }] }); success(sourceError('WTCH', 'плеєр не знайдений')); }, function (why) { success(sourceError('WTCH', why)); }); },
-      stream: function (ref, success, fail) { var url = ref && ref.url; if (url && /\.(?:m3u8|mp4)(?:$|\?)/i.test(url)) { var item = { title: 'WTCH', quality: 'auto', url: url }; if (/\.m3u8/i.test(url)) item.hls_type = 'hlsjs'; return success({ ok: true, streams: [item] }); } if (!url) return success(sourceError('WTCH', 'потік не знайдений')); wtchRequest(url, function (html) { var urls = wtchPlayerUrls(html, url); success(urls.length ? { ok: true, streams: urls.map(function (u) { return { title: 'WTCH', quality: 'auto', url: u, hls_type: /\.m3u8/i.test(u) ? 'hlsjs' : undefined }; }) } : sourceError('WTCH', 'потік не знайдений')); }, function (why) { success(sourceError('WTCH', why)); }); }
-    }
+    videohub: lampacSource('videohub'), veoveo: lampacSource('veoveo'), hdvb: lampacSource('hdvb'), vibix: lampacSource('vibix')
   };
   Lampa.Arrays.extend(UkrSites, NewSites, true);
-  Lampa.Arrays.extend(UKR_SITES, { wtch: { name: 'WTCH', base: 'https://wtch.ch' } }, true);
 
 
 

@@ -1,12 +1,12 @@
 const ALLOWED_SOURCE_HOSTS = new Set([
   'uaserials.com', 'www.uaserials.com',
   'tortuga.tw', 'www.tortuga.tw', 'tortuga.wtf', 'www.tortuga.wtf',
-  'get2.fun', 'wtch.ch', 'www.wtch.ch'
+  'get2.fun'
 ]);
 const ALLOWED_REFERER_HOSTS = new Set([
   'uaserials.com', 'www.uaserials.com',
   'tortuga.tw', 'www.tortuga.tw', 'tortuga.wtf', 'www.tortuga.wtf',
-  'get2.fun', 'wtch.ch', 'www.wtch.ch'
+  'get2.fun'
 ]);
 const CORS = {
   'Access-Control-Allow-Origin': '*',

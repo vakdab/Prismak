@@ -23,6 +23,6 @@ https://cdn.jsdelivr.net/gh/vakdab/Prismak@5abf3f8bd2ee0e5fae5854785cb642d70430e
 
 ## Додані джерела
 
-Плагін підтримує VideoHUB, VeoVeo, HDVB і Vibix через Lampac-сумісний backend, а також WTCH (`wtch.ch/m`) через Cloudflare Worker. Для чотирьох VOD-балансерів у `lampa-prismak.js` задайте HTTPS-адресу self-hosted Lampac без завершального `/` у `LAMPAC_BASE`; очікуються маршрути `/lite/videohub`, `/lite/veoveo`, `/lite/hdvb` і `/lite/vibix`. Backend має повертати JSON для `action=search|content|stream`; токени та upstream-секрети повинні залишатися на backend/Worker.
+Плагін підтримує VideoHUB, VeoVeo, HDVB і Vibix через Lampac-сумісний backend. У `lampa-prismak.js` задайте HTTPS-адресу self-hosted Lampac без завершального `/` у `LAMPAC_BASE`; очікуються маршрути `/lite/videohub`, `/lite/veoveo`, `/lite/hdvb` і `/lite/vibix`. Backend має повертати JSON для `action=search|content|stream`; токени та upstream-секрети повинні залишатися на backend/Worker.
 
-Для WTCH потрібен Worker `/source`, який дозволяє upstream `https://wtch.ch` (у цьому репозиторії це додається в `uaserials-proxy.js`). Прямі HTTP-посилання не використовуються, щоб уникнути mixed-content на iOS; HLS-потоки позначаються `hls_type: hlsjs`. Якщо Lampac не налаштований або upstream недоступний, джерело повертає зрозумілу помилку для поточного запиту і не вимикає всі джерела.
+Якщо Lampac не налаштований або upstream недоступний, джерело повертає зрозумілу помилку для поточного запиту і не вимикає всі джерела.
