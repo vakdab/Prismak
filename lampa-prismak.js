@@ -1280,6 +1280,123 @@
   UKR_SITES.uakino = { name: 'UAkino', base: UAKINO_ORIGIN };
 
 
+  /* New providers: Lampac-compatible VOD adapters + WTCH HTML adapter. */
+  var LAMPAC_BASE = ''; // Set to an HTTPS self-hosted Lampac/Prismak backend, without a trailing slash.
+  var PROVIDER_BASES = {
+    videohub: LAMPAC_BASE ? LAMPAC_BASE + '/lite/videohub' : '',
+    veoveo: LAMPAC_BASE ? LAMPAC_BASE + '/lite/veoveo' : '',
+    hdvb: LAMPAC_BASE ? LAMPAC_BASE + '/lite/hdvb' : '',
+    vibix: LAMPAC_BASE ? LAMPAC_BASE + '/lite/vibix' : ''
+  };
+  var NEW_SOURCE_TITLES = {
+    videohub: 'VideoHUB', veoveo: 'VeoVeo', hdvb: 'HDVB', vibix: 'Vibix', wtch: 'WTCH'
+  };
+
+  function sourceError(name, detail) {
+    return { ok: false, error: name + ': ' + (detail || 'джерело не відповідає') };
+  }
+  function sourceQuery(params) {
+    return Object.keys(params || {}).filter(function (key) {
+      return params[key] !== undefined && params[key] !== null && params[key] !== '';
+    }).map(function (key) { return encodeURIComponent(key) + '=' + encodeURIComponent(params[key]); }).join('&');
+  }
+  function providerRefParams(ref) {
+    ref = ref || {};
+    var out = {};
+    Object.keys(ref).forEach(function (key) {
+      var value = ref[key];
+      if (value === undefined || value === null || typeof value === 'object') return;
+      out[key] = value;
+    });
+    if (ref.imdb_id) out.imdb = ref.imdb_id;
+    if (ref.kinopoisk_id) out.kinopoisk = ref.kinopoisk_id;
+    if (ref.tmdb_id) out.tmdb = ref.tmdb_id;
+    return out;
+  }
+  function providerRequest(source, action, payload, success, fail) {
+    var base = PROVIDER_BASES[source];
+    if (!base) return success(sourceError(NEW_SOURCE_TITLES[source], 'не налаштовано LAMPAC_BASE'));
+    var params = providerRefParams(payload);
+    params.action = action;
+    var req = new Lampa.Reguest();
+    req.silent(base + '?' + sourceQuery(params), function (json) {
+      if (!json || typeof json !== 'object') return success(sourceError(NEW_SOURCE_TITLES[source], 'backend повернув некоректну відповідь'));
+      success(json);
+    }, function () { success(sourceError(NEW_SOURCE_TITLES[source], 'backend не відповідає')); });
+  }
+  function firstValue(obj, keys) {
+    for (var i = 0; i < keys.length; i++) if (obj && obj[keys[i]] !== undefined && obj[keys[i]] !== null && obj[keys[i]] !== '') return obj[keys[i]];
+    return '';
+  }
+  function providerStreams(json) {
+    var values = json && (json.streams || json.players || json.results || json.data);
+    if (!Array.isArray(values)) values = values && Array.isArray(values.streams) ? values.streams : [];
+    return values.map(function (item, index) {
+      if (typeof item === 'string') return { title: 'Потік ' + (index + 1), quality: 'auto', url: item };
+      var url = firstValue(item, ['url', 'file', 'src', 'stream', 'hls', 'm3u8']);
+      return { title: firstValue(item, ['title', 'name', 'voice', 'lang']) || 'Потік ' + (index + 1), quality: firstValue(item, ['quality', 'resolution']) || 'auto', url: url, ref: item.ref };
+    }).filter(function (item) { return item.url || item.ref; }).map(function (item) {
+      if (item.url && /\.m3u8(?:$|\?)/i.test(item.url)) item.hls_type = 'hlsjs';
+      return item;
+    });
+  }
+  function providerNormalizeContent(json, ref) {
+    var data = json && (json.content || json.result || json.data || json);
+    if (data && data.type === 'series' && Array.isArray(data.voices)) return data;
+    if (data && Array.isArray(data.voices)) return { ok: true, type: 'series', title: data.title || '', voices: data.voices };
+    var streams = providerStreams(data);
+    if (streams.length) return { ok: true, type: 'movie', title: data.title || ref.title || '', streams: streams };
+    return sourceError('Backend', 'потоки або структура серіалу не знайдені');
+  }
+  function lampacSearch(source, params, success) {
+    providerRequest(source, 'search', params, function (json) {
+      if (!json || json.ok === false) return success(json || sourceError(NEW_SOURCE_TITLES[source]));
+      var raw = json.items || json.results || json.data || [];
+      if (!Array.isArray(raw)) raw = [];
+      success({ ok: true, items: raw.map(function (item) {
+        var ref = {}; if (item.ref && typeof item.ref === 'object') Lampa.Arrays.extend(ref, item.ref, true);
+        Lampa.Arrays.extend(ref, item, true); ref.source = source;
+        return { title: firstValue(item, ['title', 'name']) || params.title || '', title_en: firstValue(item, ['title_en', 'original_title', 'original_name']), year: item.year, poster: firstValue(item, ['poster', 'poster_url', 'image']), imdb_id: item.imdb_id, tmdb_id: item.tmdb_id, kinopoisk_id: item.kinopoisk_id || item.kp_id, serial: item.serial ? 1 : 0, ref: ref };
+      }) });
+    });
+  }
+  function lampacSource(source) {
+    return {
+      search: function (params, success) { lampacSearch(source, params || {}, success); },
+      content: function (ref, success) { providerRequest(source, 'content', ref || {}, function (json) { success(providerNormalizeContent(json, ref || {})); }); },
+      stream: function (ref, success) {
+        if (ref && ref.url) { var direct = { ok: true, streams: [{ title: ref.title || NEW_SOURCE_TITLES[source], quality: ref.quality || 'auto', url: ref.url }] }; if (/\.m3u8(?:$|\?)/i.test(ref.url)) direct.streams[0].hls_type = 'hlsjs'; return success(direct); }
+        providerRequest(source, 'stream', ref || {}, function (json) { var streams = providerStreams(json); success(streams.length ? { ok: true, streams: streams } : sourceError(NEW_SOURCE_TITLES[source], 'потік не знайдений')); });
+      }
+    };
+  }
+
+  function wtchRequest(url, success, fail) { ukrRequest('wtch', url, { referer: 'https://wtch.ch/' }, success, fail); }
+  function wtchPlayerUrls(html, pageUrl) {
+    var found = [], text = String(html || ''), m;
+    var re = /(?:file|source|src|url|data-file)\s*[:=]\s*["']([^"']+\.(?:m3u8|mp4)(?:\?[^"']*)?)/ig;
+    while ((m = re.exec(text))) found.push(ukrAbs('wtch', m[1]));
+    var direct = text.match(/https?:\/\/[^\s"'<>]+\.(?:m3u8|mp4)(?:\?[^\s"'<>]*)?/ig) || [];
+    found = found.concat(direct.map(function (u) { return u.replace(/&amp;/g, '&'); }));
+    var doc = ukrDoc(text); if (doc) Array.prototype.forEach.call(doc.querySelectorAll('iframe[src], iframe[data-src], [data-file]'), function (node) { var u = node.getAttribute('data-file') || node.getAttribute('src') || node.getAttribute('data-src'); if (u && /\.(?:m3u8|mp4)/i.test(u)) found.push(ukrAbs('wtch', u)); });
+    return found.filter(function (u, i, a) { return u && a.indexOf(u) === i; });
+  }
+  var NewSites = {
+    videohub: lampacSource('videohub'), veoveo: lampacSource('veoveo'), hdvb: lampacSource('hdvb'), vibix: lampacSource('vibix'),
+    wtch: {
+      search: function (params, success, fail) {
+        var q = params.title || params.original_title || ''; var url = 'https://wtch.ch/m/?s=' + encodeURIComponent(q);
+        wtchRequest(url, function (html) { var doc = ukrDoc(html), items = [], seen = {}; if (doc) Array.prototype.forEach.call(doc.querySelectorAll('a[href]'), function (a) { var href = a.getAttribute('href'), title = ukrText(a); if (!href || !title || title.length < 2 || seen[href] || !/wtch\.ch/i.test(ukrAbs('wtch', href))) return; if (!/(film|movie|serial|сері|season|сезон|watch|див)/i.test((a.className || '') + ' ' + title + ' ' + href)) return; seen[href] = 1; var img = a.querySelector('img') || (a.parentNode && a.parentNode.querySelector && a.parentNode.querySelector('img')); items.push({ title: title, poster: img && ukrAbs('wtch', img.getAttribute('data-src') || img.getAttribute('src')), ref: { url: ukrAbs('wtch', href), source: 'wtch' } }); }); success({ ok: true, items: items.slice(0, 20) }); }, function (why) { success(sourceError('WTCH', why)); });
+      },
+      content: function (ref, success, fail) { var url = ukrAbs('wtch', ref && ref.url); if (!url) return success(sourceError('WTCH', 'сторінка не знайдена')); wtchRequest(url, function (html) { var doc = ukrDoc(html), title = ukrText(doc && (doc.querySelector('h1') || doc.querySelector('title'))) || ''; var urls = wtchPlayerUrls(html, url); if (urls.length) return success({ ok: true, type: 'movie', title: title, streams: urls.map(function (u) { return { title: 'WTCH', quality: 'auto', url: u, hls_type: /\.m3u8/i.test(u) ? 'hlsjs' : undefined }; }) }); var frame = doc && doc.querySelector('iframe[src], iframe[data-src]'); if (frame) return success({ ok: true, type: 'movie', title: title, streams: [{ title: 'WTCH player', quality: 'auto', ref: { url: ukrAbs('wtch', frame.getAttribute('src') || frame.getAttribute('data-src')), source: 'wtch', player: true } }] }); success(sourceError('WTCH', 'плеєр не знайдений')); }, function (why) { success(sourceError('WTCH', why)); }); },
+      stream: function (ref, success, fail) { var url = ref && ref.url; if (url && /\.(?:m3u8|mp4)(?:$|\?)/i.test(url)) { var item = { title: 'WTCH', quality: 'auto', url: url }; if (/\.m3u8/i.test(url)) item.hls_type = 'hlsjs'; return success({ ok: true, streams: [item] }); } if (!url) return success(sourceError('WTCH', 'потік не знайдений')); wtchRequest(url, function (html) { var urls = wtchPlayerUrls(html, url); success(urls.length ? { ok: true, streams: urls.map(function (u) { return { title: 'WTCH', quality: 'auto', url: u, hls_type: /\.m3u8/i.test(u) ? 'hlsjs' : undefined }; }) } : sourceError('WTCH', 'потік не знайдений')); }, function (why) { success(sourceError('WTCH', why)); }); }
+    }
+  };
+  Lampa.Arrays.extend(UkrSites, NewSites, true);
+  Lampa.Arrays.extend(UKR_SITES, { wtch: { name: 'WTCH', base: 'https://wtch.ch' } }, true);
+
+
+
   var config = {
     api_base: 'https://bbe.lme.isroot.in/api/v2',
     storage_prefixes: {
@@ -1325,9 +1442,9 @@
       value: function getSources(success, fail) {
         this.getJson(this.apiBase() + '/sources', function (json) {
           if (json && Array.isArray(json.sources)) {
-            json.sources = json.sources.filter(function (item) { return item && item.key != 'uaserials' && !UkrSites[item.key]; });
+            json.sources = json.sources.filter(function (item) { return item && item.key != 'uaserials' && !UkrSites[item.key] && !NewSites[item.key]; });
             Object.keys(UkrSites).forEach(function (key) {
-              json.sources.push({ key: key, name: UKR_SITES[key].name, enabled: true, capabilities: { search: true, content: true, stream: true } });
+              json.sources.push({ key: key, name: (UKR_SITES[key] && UKR_SITES[key].name) || NEW_SOURCE_TITLES[key] || key, enabled: true, capabilities: { search: true, content: true, stream: true } });
             });
           }
           success(json);
@@ -1338,7 +1455,7 @@
       value: function search(params, sources, success, fail) {
         var url = this.apiBase() + '/search';
         var sourceKey = Array.isArray(sources) ? sources.join(',') : sources;
-        if (UkrSites[sourceKey]) return UkrSites[sourceKey].search(params, success, fail);
+        if (NewSites[sourceKey]) return NewSites[sourceKey].search(params, success, fail);
         url = this.addParam(url, 'sources', sourceKey);
         url = this.addParam(url, 'source', sourceKey);
         for (var key in params) url = this.addParam(url, key, params[key]);
@@ -1347,7 +1464,7 @@
     }, {
       key: "getContent",
       value: function getContent(sourceKey, ref, success, fail) {
-        if (UkrSites[sourceKey]) return UkrSites[sourceKey].content(ref, success, fail);
+        if (NewSites[sourceKey]) return NewSites[sourceKey].content(ref, success, fail);
         var url = this.apiBase() + '/content';
         var data = { source: sourceKey, ref: ref, full: true };
         this.postJson(url, data, success, fail);
@@ -1355,7 +1472,7 @@
     }, {
       key: "getStream",
       value: function getStream(sourceKey, ref, success, fail) {
-        if (UkrSites[sourceKey]) return UkrSites[sourceKey].stream(ref, success, fail);
+        if (NewSites[sourceKey]) return NewSites[sourceKey].stream(ref, success, fail);
         var url = this.apiBase() + '/stream';
         var data = { source: sourceKey, ref: ref };
         this.postJson(url, data, success, fail);
@@ -1574,10 +1691,10 @@
         // UASerials removed; Eneyida is resolved through the Worker proxy.
         list = list.filter(function (item) {
           var k = item && sourcesStore.normalizeName(item.key || item.name);
-          return k && k != 'uaserials' && !UkrSites[k];
+          return k && k != 'uaserials' && !UkrSites[k] && !NewSites[k];
         });
         Object.keys(UkrSites).forEach(function (key) {
-          list.push({ key: key, name: UKR_SITES[key].name, enabled: true, capabilities: { search: true, content: true, stream: true } });
+          list.push({ key: key, name: (UKR_SITES[key] && UKR_SITES[key].name) || NEW_SOURCE_TITLES[key] || key, enabled: true, capabilities: { search: true, content: true, stream: true } });
         });
       }
       available_sources = list;
@@ -1668,7 +1785,7 @@
       if (last_select_balanser[object.movie.id]) {
         balanser = last_select_balanser[object.movie.id];
         Lampa.Storage.set('onlineua_last_balanser', last_select_balanser);
-      } else balanser = Lampa.Storage.get('onlineua_balanser', 'uatut');
+      } else balanser = Lampa.Storage.get('onlineua_balanser', filter_sources[0] || '');
       if (!ensureSource(balanser) || filter_sources.indexOf(balanser) === -1) balanser = filter_sources[0] || '';
       if (!ensureSource(balanser)) return null;
       return new sources[balanser](this, object);

@@ -20,3 +20,9 @@ https://cdn.jsdelivr.net/gh/vakdab/Prismak@93a25d1597ceaac556ab624aa590825d15e12
 Після кожного оновлення `main` GitHub Actions автоматично оновлює це посилання на SHA відповідного коміту.
 
 Плагін призначений для використання окремо. Якщо Prismak уже вбудований у ваш комбінований плагін, повторно додавати його не потрібно.
+
+## Додані джерела
+
+Плагін підтримує VideoHUB, VeoVeo, HDVB і Vibix через Lampac-сумісний backend, а також WTCH (`wtch.ch/m`) через Cloudflare Worker. Для чотирьох VOD-балансерів у `lampa-prismak.js` задайте HTTPS-адресу self-hosted Lampac без завершального `/` у `LAMPAC_BASE`; очікуються маршрути `/lite/videohub`, `/lite/veoveo`, `/lite/hdvb` і `/lite/vibix`. Backend має повертати JSON для `action=search|content|stream`; токени та upstream-секрети повинні залишатися на backend/Worker.
+
+Для WTCH потрібен Worker `/source`, який дозволяє upstream `https://wtch.ch` (у цьому репозиторії це додається в `uaserials-proxy.js`). Прямі HTTP-посилання не використовуються, щоб уникнути mixed-content на iOS; HLS-потоки позначаються `hls_type: hlsjs`. Якщо Lampac не налаштований або upstream недоступний, джерело повертає зрозумілу помилку для поточного запиту і не вимикає всі джерела.
