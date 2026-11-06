@@ -1281,7 +1281,7 @@
 
 
   /* New providers: Lampac-compatible VOD adapters. */
-  var LAMPAC_BASE = Lampa.Storage.get('onlineua_lampac_base', '');
+  var LAMPAC_BASE = Lampa.Storage.get('onlineua_lampac_base', 'https://prismak-sources.animegran8.workers.dev');
   var NEW_SOURCE_TITLES = {
     videohub: 'VideoHUB', veoveo: 'VeoVeo', hdvb: 'HDVB', vibix: 'Vibix'
   };

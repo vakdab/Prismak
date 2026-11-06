@@ -30,3 +30,8 @@ https://cdn.jsdelivr.net/gh/vakdab/Prismak@a2d78ebee5ec2e87cf6e4782bbcdccf1e9a57
 ## Standalone sources backend
 
 The `backend/` directory contains a standalone Node.js 20 backend for VideoHUB, VeoVeo, HDVB and Vibix. It is not loaded by Lampa automatically: deploy it behind HTTPS and set its URL in **OnlineUA → Адреса Lampac** (the setting accepts the backend's `/lite/<source>` contract). See [`backend/README.md`](backend/README.md).
+
+
+## Public backend
+
+The default CDN build uses the Prismak Cloudflare Worker at `https://prismak-sources.animegran8.workers.dev`. You can override it in **OnlineUA → Адреса Lampac** by setting the `onlineua_lampac_base` storage value.
