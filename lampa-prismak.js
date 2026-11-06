@@ -1286,8 +1286,9 @@
     videohub: 'VideoHUB', veoveo: 'VeoVeo', hdvb: 'HDVB', vibix: 'Vibix'
   };
   function getLampacBase() {
-    var base = Lampa.Storage.get('onlineua_lampac_base', LAMPAC_BASE || '');
-    base = String(base || '').trim().replace(/\/+$/, '');
+    var stored = Lampa.Storage.get('onlineua_lampac_base', '');
+    var base = String(stored || '').trim() || LAMPAC_BASE || '';
+    base = String(base).trim().replace(/\/+$/, '');
     return /^https:\/\//i.test(base) ? base : '';
   }
   function getProviderBase(source) {
