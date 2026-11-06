@@ -26,3 +26,7 @@ https://cdn.jsdelivr.net/gh/vakdab/Prismak@a2d78ebee5ec2e87cf6e4782bbcdccf1e9a57
 Плагін підтримує VideoHUB, VeoVeo, HDVB і Vibix через Lampac-сумісний backend. Адресу потрібно задати в **OnlineUA → Адреса Lampac** у storage-ключі `onlineua_lampac_base`, наприклад `https://lampac.example.com`, без завершального `/`. Після збереження очікуються маршрути `/lite/videohub`, `/lite/veoveo`, `/lite/hdvb` і `/lite/vibix`. Без валідної HTTPS-адреси ці чотири джерела не показуються. Backend має повертати JSON для `action=search|content|stream`; токени та upstream-секрети повинні залишатися на backend/Worker.
 
 Якщо Lampac не налаштований або upstream недоступний, джерело повертає зрозумілу помилку для поточного запиту і не вимикає всі джерела.
+
+## Standalone sources backend
+
+The `backend/` directory contains a standalone Node.js 20 backend for VideoHUB, VeoVeo, HDVB and Vibix. It is not loaded by Lampa automatically: deploy it behind HTTPS and set its URL in **OnlineUA → Адреса Lampac** (the setting accepts the backend's `/lite/<source>` contract). See [`backend/README.md`](backend/README.md).
