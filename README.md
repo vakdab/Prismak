@@ -8,6 +8,12 @@
 
 ```text
 https://cdn.jsdelivr.net/gh/vakdab/Prismak@main/lampa-prismak.js
+
+Аліас для встановлення як `online.js`:
+
+```text
+https://cdn.jsdelivr.net/gh/vakdab/Prismak@main/online.js
+```
 ```
 
 Зафіксована версія (поточний commit SHA):
