@@ -9,7 +9,7 @@
 ```text
 https://cdn.jsdelivr.net/gh/vakdab/Prismak@main/lampa-prismak.js
 
-Аліас для встановлення як `online.js`:
+Оригінальний плагін `online.js` синхронізовано з `http://wtch.ch/online.js`. Для встановлення через jsDelivr:
 
 ```text
 https://cdn.jsdelivr.net/gh/vakdab/Prismak@main/online.js
